@@ -5,6 +5,7 @@ const multer = require('multer');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const OpenAI = require('openai');
+// Top of server.js
 const pdf = require('pdf-parse');
 const mammoth = require('mammoth');
 const { createClient } = require('@supabase/supabase-js');
@@ -180,15 +181,22 @@ app.get('/api/chatbots/:id/documents', authenticateToken, async (req, res) => {
   }
 });
 
+// ✅ Inside the document upload route
 app.post('/api/chatbots/:id/documents', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
 
     let content = '';
+
+    // Use pdf-parse for PDF files with try/catch
     if (file.mimetype === 'application/pdf') {
-      const data = await pdf(file.buffer);
-      content = data.text;
+      try {
+        const data = await pdf(file.buffer);
+        content = data.text;
+      } catch (err) {
+        return res.status(400).json({ error: 'Failed to parse PDF file' });
+      }
     } else {
       content = file.buffer.toString('utf-8');
     }
@@ -209,8 +217,10 @@ app.post('/api/chatbots/:id/documents', authenticateToken, upload.single('file')
       .single();
 
     if (error) throw error;
+
     res.json(data);
   } catch (error) {
+    console.error('❌ Upload error:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
