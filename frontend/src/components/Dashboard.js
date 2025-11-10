@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { chatbots, documents } from '../services/api';
 
@@ -17,20 +17,7 @@ function Dashboard({ setAuth }) {
   const [welcomeMessage, setWelcomeMessage] = useState('Hi! How can I help you today?');
   const [showNewBotForm, setShowNewBotForm] = useState(false);
 
-  useEffect(() => {
-    loadChatbots();
-  }, []);
-
-  useEffect(() => {
-    if (selectedChatbot) {
-      loadDocuments(selectedChatbot.id);
-      setChatbotName(selectedChatbot.name);
-      setChatbotColor(selectedChatbot.color);
-      setWelcomeMessage(selectedChatbot.welcome_message);
-    }
-  }, [selectedChatbot]);
-
-  const loadChatbots = async () => {
+  const loadChatbots = useCallback(async () => {
     try {
       const response = await chatbots.getAll();
       setAllChatbots(response.data);
@@ -42,7 +29,21 @@ function Dashboard({ setAuth }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedChatbot]);
+
+  useEffect(() => {
+    loadChatbots();
+  }, [loadChatbots]);
+
+  useEffect(() => {
+    if (selectedChatbot) {
+      loadDocuments(selectedChatbot.id);
+      setChatbotName(selectedChatbot.name);
+      setChatbotColor(selectedChatbot.color);
+      setWelcomeMessage(selectedChatbot.welcome_message);
+    }
+  }, [selectedChatbot]);
+
 
   const loadDocuments = async (chatbotId) => {
     try {
