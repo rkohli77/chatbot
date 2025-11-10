@@ -16,8 +16,39 @@ const PORT = process.env.PORT || 3001;
 // Initialize Supabase client
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// CORS configuration
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? [process.env.FRONTEND_URL]
+  : [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:3002',
+      'http://localhost:3003',
+      'http://127.0.0.1:3000',
+      'http://127.0.0.1:3001',
+      'http://127.0.0.1:3002',
+      'http://127.0.0.1:3003'
+    ];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -240,9 +271,51 @@ app.delete('/api/chatbots/:id/documents/:docId', authenticateToken, async (req, 
 });
 
 // === MISC ===
-app.get('/widget.js', (req, res) => {
-  res.setHeader('Content-Type', 'application/javascript');
-  res.send('console.log("Widget loaded via Supabase backend");');
+// Serve static files from public directory
+app.use(express.static('public'));
+
+// Chat endpoint for widget
+app.post('/api/chat', async (req, res) => {
+  try {
+    const { chatbotId, message } = req.body;
+    if (!chatbotId || !message) {
+      return res.status(400).json({ error: 'Missing required parameters' });
+    }
+
+    // Get chatbot documents
+    const { data: documents } = await supabase
+      .from('documents')
+      .select('content')
+      .eq('chatbot_id', chatbotId);
+
+    if (!documents || documents.length === 0) {
+      return res.status(404).json({ error: 'No training data found for this chatbot' });
+    }
+
+    // Combine all document content
+    const context = documents.map(doc => doc.content).join('\n\n');
+
+    // Generate response using OpenAI
+    const completion = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "system",
+          content: `You are a helpful AI assistant. Use the following context to answer questions: ${context}`
+        },
+        {
+          role: "user",
+          content: message
+        }
+      ],
+      max_tokens: 150
+    });
+
+    res.json({ response: completion.choices[0].message.content });
+  } catch (error) {
+    console.error('Chat error:', error);
+    res.status(500).json({ error: 'Failed to process chat message' });
+  }
 });
 
 app.use((req, res) => {

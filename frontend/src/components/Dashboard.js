@@ -144,10 +144,11 @@ function Dashboard({ setAuth }) {
   window.chatbotConfig = {
     chatbotId: "${selectedChatbot.id}",
     color: "${chatbotColor}",
-    name: "${chatbotName}"
+    name: "${chatbotName}",
+    apiUrl: "${process.env.REACT_APP_API_URL || window.location.origin}"
   };
 </script>
-<script src="http://localhost:3001/widget.js"></script>` : '';
+<script src="${process.env.REACT_APP_API_URL || window.location.origin}/widget.js"></script>` : '';
 
   const handleCopyCode = () => {
     navigator.clipboard.writeText(widgetCode);

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chatbot Widget Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    .hero {
+      background: white;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    h1 { color: #333; margin: 0 0 10px 0; }
+    p { color: #666; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>🎉 Chatbot Widget Test Page</h1>
+    <p>This is a test page to see your chatbot widget in action!</p>
+    <p><strong>Try it:</strong> Click the chat button in the bottom-right corner and ask: "What are your business hours?"</p>
+  </div>
+
+  <div class="hero">
+    <h2>Features</h2>
+    <p>✅ AI-powered responses</p>
+    <p>✅ Based on your uploaded documents</p>
+    <p>✅ Beautiful, responsive design</p>
+    <p>✅ Easy to embed on any website</p>
+  </div>
+
+  <!-- Chatbot Widget Code -->
+  <script>
+    window.chatbotConfig = {
+      chatbotId: "YOUR_CHATBOT_ID", // ⚠️ Replace with your actual chatbot ID
+      color: "#6366f1",
+      name: "Support Bot"
+    };
+  </script>
+  <script src="http://localhost:3001/widget.js"></script>
+</body>
+</html>
