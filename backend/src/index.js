@@ -64,7 +64,7 @@ const authenticateToken = async (c, next) => {
 
 // Basic routes
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: new Date().toISOString() }));
-app.get('/', (c) => c.json({ message: 'Chatbot API (Cloudflare)', version: '3.2.0' }));
+app.get('/', (c) => c.json({ message: 'Chatbot API (Cloudflare)', version: '3.3.0' }));
 
 // === AUTH ROUTES ===
 app.post('/api/auth/register', async (c) => {
