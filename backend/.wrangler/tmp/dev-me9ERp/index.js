@@ -15136,8 +15136,7 @@ var src_default = {
 var app = new Hono2();
 var allowedOrigins = [
   "http://localhost:3000",
-  "https://your-frontend-domain.pages.dev"
-  // Update this with your actual Cloudflare Pages domain
+  "https://chatbot.prosperonline.ca"
 ];
 app.use("/api/auth/*", cors({
   origin: allowedOrigins,

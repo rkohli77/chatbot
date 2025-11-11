@@ -9,7 +9,7 @@ const app = new Hono();
 // CORS configuration
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://your-frontend-domain.pages.dev' // Update this with your actual Cloudflare Pages domain
+  'https://chatbot.prosperonline.ca'
 ];
 
 // CORS for authenticated routes
