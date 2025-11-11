@@ -792,6 +792,5 @@ if (!document.head.querySelector('style[data-toast]')) {
   style.setAttribute('data-toast', 'true');
   document.head.appendChild(style);
 }
-}
 
 export default Dashboard;
