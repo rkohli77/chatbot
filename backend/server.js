@@ -17,49 +17,35 @@ const PORT = process.env.PORT || 3001;
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // CORS configuration
-const allowedOrigins = process.env.NODE_ENV === 'production'
-  ? [process.env.FRONTEND_URL]
-  : [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:3002',
-      'http://localhost:3003',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-      'http://127.0.0.1:3002',
-      'http://127.0.0.1:3003'
-    ];
-
-// CORS options for authenticated routes
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-    if (allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
-};
-
-// CORS options for public widget endpoints (allow all origins)
 const corsOptionsPublic = {
-  origin: '*', // Allow all origins for widget (use '*' for public APIs)
+  origin: '*',
   credentials: false,
   methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'X-Requested-With', 'Accept', 'Origin'],
-  preflightContinue: false,
-  optionsSuccessStatus: 204 // 204 No Content is standard for OPTIONS
+  allowedHeaders: ['Content-Type', 'X-Requested-With', 'Accept', 'Origin']
 };
 
-// Middleware - CORS for all routes (will be overridden by route-specific CORS)
-app.use(cors(corsOptionsPublic));
+// Apply CORS
+if (process.env.NODE_ENV === 'production') {
+  const corsOptions = {
+    origin: process.env.FRONTEND_URL,
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  };
+  app.use(cors(corsOptions));
+} else {
+  // Simple CORS for localhost development
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    if (req.method === 'OPTIONS') {
+      res.sendStatus(200);
+    } else {
+      next();
+    }
+  });
+}
 app.use(express.json());
 
 app.use((req, res, next) => {
@@ -97,7 +83,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().
 app.get('/', (req, res) => res.json({ message: 'Chatbot API (Supabase)', version: '2.0.0' }));
 
 // === AUTH ROUTES ===
-app.post('/api/auth/register', cors(corsOptions), async (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   console.log('📝 Register:', req.body.email);
   try {
     const { email, password } = req.body;
@@ -126,7 +112,7 @@ app.post('/api/auth/register', cors(corsOptions), async (req, res) => {
   }
 });
 
-app.post('/api/auth/login', cors(corsOptions), async (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   console.log('🔑 Login:', req.body.email);
   try {
     const { email, password } = req.body;
@@ -151,7 +137,7 @@ app.post('/api/auth/login', cors(corsOptions), async (req, res) => {
 });
 
 // === CHATBOTS ===
-app.get('/api/chatbots', cors(corsOptions), authenticateToken, async (req, res) => {
+app.get('/api/chatbots', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('chatbots')
@@ -160,12 +146,14 @@ app.get('/api/chatbots', cors(corsOptions), authenticateToken, async (req, res) 
       .order('created_at', { ascending: false });
     if (error) throw error;
     res.json(data);
+    console.log('Fetched chatbots for user:', req.user.email);
+    console.log(data);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/chatbots', cors(corsOptions), authenticateToken, async (req, res) => {
+app.post('/api/chatbots', authenticateToken, async (req, res) => {
   try {
     const { name, color, welcomeMessage } = req.body;
     const id = 'cb_' + Math.random().toString(36).substr(2, 9);
@@ -191,7 +179,7 @@ app.post('/api/chatbots', cors(corsOptions), authenticateToken, async (req, res)
   }
 });
 
-app.put('/api/chatbots/:id', cors(corsOptions), authenticateToken, async (req, res) => {
+app.put('/api/chatbots/:id', authenticateToken, async (req, res) => {
   try {
     const { name, color, welcomeMessage, isDeployed } = req.body;
     const { data, error } = await supabase
@@ -210,7 +198,7 @@ app.put('/api/chatbots/:id', cors(corsOptions), authenticateToken, async (req, r
 });
 
 // === DOCUMENTS ===
-app.get('/api/chatbots/:id/documents', cors(corsOptions), authenticateToken, async (req, res) => {
+app.get('/api/chatbots/:id/documents', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('documents')
@@ -224,7 +212,7 @@ app.get('/api/chatbots/:id/documents', cors(corsOptions), authenticateToken, asy
 });
 
 // ✅ Inside the document upload route
-app.post('/api/chatbots/:id/documents', cors(corsOptions), authenticateToken, upload.single('file'), async (req, res) => {
+app.post('/api/chatbots/:id/documents', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
     if (!file) return res.status(400).json({ error: 'No file uploaded' });
@@ -267,7 +255,7 @@ app.post('/api/chatbots/:id/documents', cors(corsOptions), authenticateToken, up
   }
 });
 
-app.delete('/api/chatbots/:id/documents/:docId', cors(corsOptions), authenticateToken, async (req, res) => {
+app.delete('/api/chatbots/:id/documents/:docId', authenticateToken, async (req, res) => {
   try {
     const { error } = await supabase
       .from('documents')
@@ -282,12 +270,11 @@ app.delete('/api/chatbots/:id/documents/:docId', cors(corsOptions), authenticate
 });
 
 // === MISC ===
-// Serve static files from public directory with CORS headers for widget
+// Widget endpoints - always public (no CORS restrictions)
 app.use('/widget.js', cors(corsOptionsPublic), express.static('public/widget.js'));
 app.use(express.static('public'));
 
-// Chat endpoint for widget (public, allow all origins)
-// CORS middleware will automatically handle OPTIONS preflight
+// Chat endpoint for widget - always public
 app.post('/api/chat', cors(corsOptionsPublic), async (req, res) => {
   try {
     const { chatbotId, message } = req.body;
