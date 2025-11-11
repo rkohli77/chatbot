@@ -71,11 +71,8 @@ function Dashboard({ setAuth }) {
   };
 
   const handleFileUpload = async (e) => {
-    console.log(`✅ file here`);
     const file = e.target.files[0];
     if (!file || !selectedChatbot) return;
-      console.log(`✅ file here`);
-
     try {
       const response = await documents.upload(selectedChatbot.id, file);
       setFiles([response.data, ...files]);
