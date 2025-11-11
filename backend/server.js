@@ -5,6 +5,8 @@ const multer = require('multer');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const OpenAI = require('openai');
+const helmet = require('helmet');
+const { body, validationResult } = require('express-validator');
 // Top of server.js
 const pdf = require('pdf-parse');
 const mammoth = require('mammoth');
@@ -12,6 +14,71 @@ const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Trust proxy for accurate IP addresses (important for rate limiting)
+app.set('trust proxy', 1);
+
+// Security headers with Helmet
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"], // Allow inline scripts for widget
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "*"], // Allow API calls from widget
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Allow embedding widget
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow widget to load
+}));
+
+// Request size limits
+app.use(express.json({ limit: '1mb' })); // Limit JSON payload size
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// Simple rate limiting for chat endpoint (prevent abuse)
+const rateLimitMap = new Map();
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 20; // 20 requests per minute per IP
+
+const rateLimitMiddleware = (req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress || 'unknown';
+  const now = Date.now();
+  
+  if (!rateLimitMap.has(ip)) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  const limit = rateLimitMap.get(ip);
+  
+  if (now > limit.resetTime) {
+    // Reset window
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW });
+    return next();
+  }
+  
+  if (limit.count >= RATE_LIMIT_MAX_REQUESTS) {
+    return res.status(429).json({ 
+      error: 'Too many requests. Please try again later.',
+      retryAfter: Math.ceil((limit.resetTime - now) / 1000)
+    });
+  }
+  
+  limit.count++;
+  next();
+};
+
+// Clean up old entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, limit] of rateLimitMap.entries()) {
+    if (now > limit.resetTime) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}, RATE_LIMIT_WINDOW);
 
 // Initialize Supabase client
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
@@ -103,12 +170,26 @@ app.post('/api/auth/register', async (req, res) => {
 
     if (error) throw error;
 
-    const token = jwt.sign({ userId: data.id, email: data.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    console.log('✅ Registered:', email);
-    res.json({ token, user: { id: data.id, email: data.email } });
-  } catch (error) {
-    console.error('❌ Register error:', error.message);
-    res.status(500).json({ error: error.message });
+      const { data: existing } = await supabase.from('users').select('id').eq('email', email.toLowerCase());
+      if (existing?.length > 0)
+        return res.status(400).json({ error: 'Email already registered' });
+
+      const hash = await bcrypt.hash(password, 10); // Increased salt rounds for better security
+      const { data, error } = await supabase
+        .from('users')
+        .insert([{ email: email.toLowerCase(), password_hash: hash }])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const token = jwt.sign({ userId: data.id, email: data.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+      console.log('✅ Registered:', email);
+      res.json({ token, user: { id: data.id, email: data.email } });
+    } catch (error) {
+      console.error('❌ Register error:', error.message);
+      res.status(500).json({ error: 'Registration failed. Please try again.' }); // Generic error message
+    }
   }
 });
 
@@ -119,22 +200,23 @@ app.post('/api/auth/login', async (req, res) => {
     if (!email || !password)
       return res.status(400).json({ error: 'Email and password required' });
 
-    const { data: users, error } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).single();
-    if (error || !users)
-      return res.status(401).json({ error: 'Invalid credentials' });
+      const { data: users, error } = await supabase.from('users').select('*').eq('email', email.toLowerCase()).single();
+      if (error || !users)
+        return res.status(401).json({ error: 'Invalid credentials' }); // Generic message for security
 
-    const valid = await bcrypt.compare(password, users.password_hash);
-    if (!valid)
-      return res.status(401).json({ error: 'Invalid credentials' });
+      const valid = await bcrypt.compare(password, users.password_hash);
+      if (!valid)
+        return res.status(401).json({ error: 'Invalid credentials' }); // Generic message for security
 
-    const token = jwt.sign({ userId: users.id, email: users.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
-    console.log('✅ Login success:', email);
-    res.json({ token, user: { id: users.id, email: users.email } });
-  } catch (error) {
-    console.error('❌ Login error:', error.message);
-    res.status(500).json({ error: error.message });
+      const token = jwt.sign({ userId: users.id, email: users.email }, process.env.JWT_SECRET, { expiresIn: '7d' });
+      console.log('✅ Login success:', email);
+      res.json({ token, user: { id: users.id, email: users.email } });
+    } catch (error) {
+      console.error('❌ Login error:', error.message);
+      res.status(500).json({ error: 'Login failed. Please try again.' }); // Generic error message
+    }
   }
-});
+);
 
 // === CHATBOTS ===
 app.get('/api/chatbots', authenticateToken, async (req, res) => {
@@ -283,10 +365,15 @@ app.post('/api/chat', cors(corsOptionsPublic), async (req, res) => {
     }
 
     // Get chatbot documents
-    const { data: documents } = await supabase
+    const { data: documents, error: docError } = await supabase
       .from('documents')
       .select('content')
       .eq('chatbot_id', chatbotId);
+    
+    if (docError) {
+      console.error('Database error:', docError);
+      return res.status(500).json({ error: 'Failed to retrieve chatbot data' });
+    }
 
     if (!documents || documents.length === 0) {
       return res.status(404).json({ error: 'No training data found for this chatbot' });
@@ -313,14 +400,23 @@ app.post('/api/chat', cors(corsOptionsPublic), async (req, res) => {
 
     res.json({ response: completion.choices[0].message.content });
   } catch (error) {
-    console.error('Chat error:', error);
-    res.status(500).json({ error: 'Failed to process chat message' });
+    console.error('Chat error:', error.message);
+    // Don't leak internal error details
+    if (error.response?.status === 429) {
+      return res.status(429).json({ error: 'OpenAI API rate limit exceeded. Please try again later.' });
+    }
+    if (error.response?.status === 401) {
+      return res.status(500).json({ error: 'API authentication failed' });
+    }
+    res.status(500).json({ error: 'Failed to process chat message. Please try again.' });
   }
 });
 
 // Error handling middleware (must be after all routes)
 app.use((err, req, res, next) => {
   console.error('❌ Server error:', err.message);
+  console.error('Stack:', err.stack); // Log full stack for debugging
+  
   // For CORS errors, still send CORS headers
   if (req.method === 'OPTIONS') {
     res.header('Access-Control-Allow-Origin', req.headers.origin || '*');
@@ -328,7 +424,14 @@ app.use((err, req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Content-Type, X-Requested-With, Accept, Origin');
     return res.status(200).end();
   }
-  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+  
+  // Don't leak internal error details to clients
+  const statusCode = err.status || 500;
+  const message = statusCode === 500 
+    ? 'Internal server error' 
+    : (err.message || 'An error occurred');
+  
+  res.status(statusCode).json({ error: message });
 });
 
 app.use((req, res) => {
