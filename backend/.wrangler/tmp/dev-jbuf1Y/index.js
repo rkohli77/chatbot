@@ -15176,7 +15176,7 @@ var authenticateToken = /* @__PURE__ */ __name(async (c, next) => {
   }
 }, "authenticateToken");
 app.get("/health", (c) => c.json({ status: "ok", timestamp: (/* @__PURE__ */ new Date()).toISOString() }));
-app.get("/", (c) => c.json({ message: "Chatbot API (Cloudflare)", version: "3.1.0" }));
+app.get("/", (c) => c.json({ message: "Chatbot API (Cloudflare)", version: "3.2.0" }));
 app.post("/api/auth/register", async (c) => {
   try {
     const { email, password } = await c.req.json();
