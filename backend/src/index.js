@@ -49,7 +49,7 @@ const authenticateToken = async (c, next) => {
   }
 
   try {
-    const isValid = await jwt.verify(token, c.env.JWT_SECRET);
+    const isValid = await jwt.verify(token, String(c.env.JWT_SECRET));
     if (!isValid) {
       return c.json({ error: 'Invalid token' }, 403);
     }
@@ -96,8 +96,7 @@ app.post('/api/auth/register', async (c) => {
 
     const token = await jwt.sign(
       { userId: data.id, email: data.email },
-      c.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      String(c.env.JWT_SECRET)
     );
 
     return c.json({ token, user: { id: data.id, email: data.email } });
@@ -131,8 +130,7 @@ app.post('/api/auth/login', async (c) => {
 
     const token = await jwt.sign(
       { userId: users.id, email: users.email },
-      c.env.JWT_SECRET,
-      { expiresIn: '7d' }
+      String(c.env.JWT_SECRET)
     );
 
     return c.json({ token, user: { id: users.id, email: users.email } });

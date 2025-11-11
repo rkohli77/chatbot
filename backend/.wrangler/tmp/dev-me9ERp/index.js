@@ -15164,7 +15164,7 @@ var authenticateToken = /* @__PURE__ */ __name(async (c, next) => {
     return c.json({ error: "Token required" }, 401);
   }
   try {
-    const isValid = await src_default.verify(token, c.env.JWT_SECRET);
+    const isValid = await src_default.verify(token, String(c.env.JWT_SECRET));
     if (!isValid) {
       return c.json({ error: "Invalid token" }, 403);
     }
@@ -15194,8 +15194,7 @@ app.post("/api/auth/register", async (c) => {
       throw error;
     const token = await src_default.sign(
       { userId: data.id, email: data.email },
-      c.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      String(c.env.JWT_SECRET)
     );
     return c.json({ token, user: { id: data.id, email: data.email } });
   } catch (error) {
@@ -15219,8 +15218,7 @@ app.post("/api/auth/login", async (c) => {
     }
     const token = await src_default.sign(
       { userId: users.id, email: users.email },
-      c.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      String(c.env.JWT_SECRET)
     );
     return c.json({ token, user: { id: users.id, email: users.email } });
   } catch (error) {
