@@ -1,0 +1,3 @@
+# Cloudflare Pages redirects
+/api/* https://chatbot-api.your-subdomain.workers.dev/:splat 200
+/* /index.html 200
