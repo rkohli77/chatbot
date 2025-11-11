@@ -11,5 +11,5 @@ name = "chatbot-api-prod"
 
 [vars]
 NODE_ENV = "production"
-SUPABASE_URL = "https://gfpksdqblblnvkyiopcc.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdmcGtzZHFibGJsbnZreWlvcGNjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjI1Njk0NjIsImV4cCI6MjA3ODE0NTQ2Mn0.c1coL9Nppq_loiwNdb1Db_49SKf1Eacm8mrpkp0pRD0"
+# Secrets are set via: wrangler secret put <KEY_NAME>
+# SUPABASE_URL and SUPABASE_KEY are stored as secrets
