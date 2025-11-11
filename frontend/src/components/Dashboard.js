@@ -10,6 +10,12 @@ function Dashboard({ setAuth }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [notification, setNotification] = useState(null);
+
+  const showNotification = (message, type = 'success') => {
+    setNotification({ message, type });
+    setTimeout(() => setNotification(null), 4000);
+  };
   
   // Form states
   const [chatbotName, setChatbotName] = useState('My Support Bot');
@@ -64,9 +70,9 @@ function Dashboard({ setAuth }) {
       setAllChatbots([response.data, ...allChatbots]);
       setSelectedChatbot(response.data);
       setShowNewBotForm(false);
-      alert('Chatbot created successfully!');
+      showNotification('Chatbot created successfully!');
     } catch (error) {
-      alert('Failed to create chatbot: ' + error.response?.data?.error);
+      showNotification('Failed to create chatbot: ' + (error.response?.data?.error || 'Unknown error'), 'error');
     }
   };
 
@@ -76,20 +82,20 @@ function Dashboard({ setAuth }) {
     try {
       const response = await documents.upload(selectedChatbot.id, file);
       setFiles([response.data, ...files]);
-      alert('Document uploaded successfully!');
+      showNotification('Document uploaded successfully!');
     } catch (error) {
-      alert('Failed to upload: ' + error.response?.data?.error);
+      showNotification('Failed to upload document: ' + (error.response?.data?.error || 'Unknown error'), 'error');
     }
   };
 
   const handleDeleteFile = async (docId) => {
-    if (!window.confirm('Delete this document?')) return;
+    if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) return;
     
     try {
       await documents.delete(selectedChatbot.id, docId);
       setFiles(files.filter(f => f.id !== docId));
     } catch (error) {
-      alert('Failed to delete: ' + error.response?.data?.error);
+      showNotification('Failed to delete document: ' + (error.response?.data?.error || 'Unknown error'), 'error');
     }
   };
 
@@ -102,31 +108,31 @@ function Dashboard({ setAuth }) {
         color: chatbotColor,
         welcomeMessage: welcomeMessage
       });
-      alert('Chatbot updated successfully!');
+      showNotification('Chatbot settings updated successfully!');
       loadChatbots();
     } catch (error) {
-      alert('Failed to update: ' + error.response?.data?.error);
+      showNotification('Failed to update chatbot: ' + (error.response?.data?.error || 'Unknown error'), 'error');
     }
   };
 
   const handleDeploy = async () => {
     if (!selectedChatbot) {
-      alert('Please create a chatbot first!');
+      showNotification('Please create a chatbot before deploying', 'warning');
       return;
     }
     
     if (files.length === 0) {
-      alert('Please upload at least one document before deploying!');
+      showNotification('Please upload at least one document before deploying your chatbot', 'warning');
       return;
     }
 
     try {
       await chatbots.update(selectedChatbot.id, { isDeployed: true });
-      alert('Chatbot deployed successfully!');
+      showNotification('Chatbot deployed successfully! Your widget is now live.');
       setActiveTab('deploy');
       loadChatbots();
     } catch (error) {
-      alert('Failed to deploy: ' + error.response?.data?.error);
+      showNotification('Failed to deploy chatbot: ' + (error.response?.data?.error || 'Unknown error'), 'error');
     }
   };
 
@@ -174,6 +180,30 @@ function Dashboard({ setAuth }) {
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       padding: '40px 20px'
     }}>
+      {/* Toast Notification */}
+      {notification && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 1000,
+          background: notification.type === 'error' ? '#ef4444' : 
+                     notification.type === 'warning' ? '#f59e0b' : '#10b981',
+          color: 'white',
+          padding: '16px 24px',
+          borderRadius: '8px',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+          maxWidth: '400px',
+          fontSize: '14px',
+          fontWeight: '500',
+          animation: 'slideIn 0.3s ease-out'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>{notification.type === 'error' ? '❌' : notification.type === 'warning' ? '⚠️' : '✅'}</span>
+            {notification.message}
+          </div>
+        </div>
+      )}
       <div style={{
         maxWidth: '1200px',
         margin: '0 auto'
@@ -742,6 +772,26 @@ function Dashboard({ setAuth }) {
       </div>
     </div>
   );
+}
+
+// Add CSS animation for toast
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+`;
+if (!document.head.querySelector('style[data-toast]')) {
+  style.setAttribute('data-toast', 'true');
+  document.head.appendChild(style);
+}
 }
 
 export default Dashboard;
