@@ -11,15 +11,19 @@
         return;
     }
 
-    // Load live settings
+    // Load live settings - exit if not deployed
     let live = {};
     try {
         const res = await fetch(`${cfg.apiUrl}/public/chatbots/${cfg.chatbotId}`, { cache: 'no-store' });
         if (res.ok) {
             live = await res.json();
+        } else {
+            console.log('Chatbot not deployed or not found');
+            return;
         }
     } catch (e) {
-        console.warn('Failed to fetch live chatbot settings, falling back to embed values.', e);
+        console.log('Chatbot not available:', e.message);
+        return;
     }
 
     const config = {
