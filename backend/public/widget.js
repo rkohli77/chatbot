@@ -210,8 +210,18 @@
         if (e.key === 'Enter') sendMessage(input.value);
     };
 
-    // Add welcome message if provided
-    if (config.welcomeMessage) {
-        addMessage(config.welcomeMessage);
-    }
+    // Show welcome message when chat opens
+    let welcomeShown = false;
+    const originalToggle = toggleButton.onclick;
+    toggleButton.onclick = () => {
+        const isVisible = chatWindow.style.display === 'flex';
+        chatWindow.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            input.focus();
+            if (!welcomeShown && config.welcomeMessage) {
+                addMessage(config.welcomeMessage);
+                welcomeShown = true;
+            }
+        }
+    };
 })(); 
