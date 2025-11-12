@@ -65,8 +65,52 @@
         color: white;
         font-family: system-ui, -apple-system, sans-serif;
         font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     `;
-    chatHeader.textContent = config.name || 'AI Chat';
+    
+    const chatTitle = document.createElement('span');
+    chatTitle.textContent = config.name || 'AI Chat';
+    
+    const headerButtons = document.createElement('div');
+    headerButtons.style.cssText = `
+        display: flex;
+        gap: 8px;
+    `;
+    
+    const minimizeBtn = document.createElement('button');
+    minimizeBtn.innerHTML = '−';
+    minimizeBtn.style.cssText = `
+        background: none;
+        border: none;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 3px;
+    `;
+    minimizeBtn.onmouseover = () => minimizeBtn.style.background = 'rgba(255,255,255,0.2)';
+    minimizeBtn.onmouseout = () => minimizeBtn.style.background = 'none';
+    
+    const closeBtn = document.createElement('button');
+    closeBtn.innerHTML = '×';
+    closeBtn.style.cssText = `
+        background: none;
+        border: none;
+        color: white;
+        font-size: 18px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 3px;
+    `;
+    closeBtn.onmouseover = () => closeBtn.style.background = 'rgba(255,255,255,0.2)';
+    closeBtn.onmouseout = () => closeBtn.style.background = 'none';
+    
+    headerButtons.appendChild(minimizeBtn);
+    headerButtons.appendChild(closeBtn);
+    chatHeader.appendChild(chatTitle);
+    chatHeader.appendChild(headerButtons);
 
     // Chat messages container
     const messagesContainer = document.createElement('div');
@@ -212,16 +256,29 @@
 
     // Show welcome message when chat opens
     let welcomeShown = false;
-    const originalToggle = toggleButton.onclick;
+    
+    function showChat() {
+        chatWindow.style.display = 'flex';
+        input.focus();
+        if (!welcomeShown && config.welcomeMessage) {
+            addMessage(config.welcomeMessage);
+            welcomeShown = true;
+        }
+    }
+    
+    function hideChat() {
+        chatWindow.style.display = 'none';
+    }
+    
     toggleButton.onclick = () => {
         const isVisible = chatWindow.style.display === 'flex';
-        chatWindow.style.display = isVisible ? 'none' : 'flex';
-        if (!isVisible) {
-            input.focus();
-            if (!welcomeShown && config.welcomeMessage) {
-                addMessage(config.welcomeMessage);
-                welcomeShown = true;
-            }
+        if (isVisible) {
+            hideChat();
+        } else {
+            showChat();
         }
     };
+    
+    minimizeBtn.onclick = hideChat;
+    closeBtn.onclick = hideChat;
 })(); 
