@@ -558,32 +558,7 @@ app.get('/widget.js', async (c) => {
         welcomeShown = true;
       }
     }
-  };t.disabled = true;
-    sendButton.disabled = true;
-
-    try {
-      const response = await fetch(\`\${config.apiUrl}/api/chat\`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chatbotId: config.chatbotId, message: text })
-      });
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
-      addMessage(data.response);
-    } catch (error) {
-      addMessage('Sorry, I encountered an error. Please try again later.');
-      console.error('Chat error:', error);
-    } finally {
-      input.disabled = false;
-      sendButton.disabled = false;
-      input.focus();
-    }
-  }
-
-  sendButton.onclick = () => sendMessage(input.value);
-  input.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(input.value); };
-
-  if (config.welcomeMessage) addMessage(config.welcomeMessage);
+  };
 })();
   `;
   return c.text(widgetCode, 200, { 
