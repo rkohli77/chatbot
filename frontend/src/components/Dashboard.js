@@ -14,7 +14,13 @@ function Dashboard({ setAuth }) {
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
-    setTimeout(() => setNotification(null), 4000);
+    if (type === 'success') {
+      setTimeout(() => setNotification(null), 4000);
+    }
+  };
+
+  const clearNotification = () => {
+    setNotification(null);
   };
   
   // Form states
@@ -115,6 +121,11 @@ function Dashboard({ setAuth }) {
     }
   };
 
+  const handleTabChange = (tab) => {
+    clearNotification();
+    setActiveTab(tab);
+  };
+
   const handleDeploy = async () => {
     if (!selectedChatbot) {
       showNotification('Please create a chatbot before deploying', 'warning');
@@ -129,7 +140,6 @@ function Dashboard({ setAuth }) {
     try {
       await chatbots.update(selectedChatbot.id, { isDeployed: true });
       showNotification('Chatbot deployed successfully! Your widget is now live.');
-      setActiveTab('deploy');
       loadChatbots();
     } catch (error) {
       showNotification('Failed to deploy chatbot: ' + (error.response?.data?.error || 'Unknown error'), 'error');
@@ -178,28 +188,67 @@ function Dashboard({ setAuth }) {
       background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
       padding: '40px 20px'
     }}>
-      {/* Toast Notification */}
+      {/* Inline Notification */}
       {notification && (
         <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 1000,
-          background: notification.type === 'error' ? '#ef4444' : 
-                     notification.type === 'warning' ? '#f59e0b' : '#10b981',
-          color: 'white',
-          padding: '16px 24px',
-          borderRadius: '8px',
-          boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-          maxWidth: '400px',
-          fontSize: '14px',
-          fontWeight: '500',
-          animation: 'slideIn 0.3s ease-out'
+          maxWidth: '1200px',
+          margin: '0 auto 24px auto',
+          background: notification.type === 'error' ? 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)' : 
+                     notification.type === 'warning' ? 'linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%)' : 
+                     'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)',
+          border: `2px solid ${notification.type === 'error' ? '#f87171' : 
+                               notification.type === 'warning' ? '#fbbf24' : '#34d399'}`,
+          borderRadius: '12px',
+          padding: '18px 24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          boxShadow: '0 10px 25px rgba(0,0,0,0.1)'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>{notification.type === 'error' ? '❌' : notification.type === 'warning' ? '⚠️' : '✅'}</span>
-            {notification.message}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              background: notification.type === 'error' ? '#ef4444' : 
+                         notification.type === 'warning' ? '#f59e0b' : '#10b981',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '18px'
+            }}>
+              {notification.type === 'error' ? '✕' : notification.type === 'warning' ? '⚠' : '✓'}
+            </div>
+            <span style={{
+              color: notification.type === 'error' ? '#7f1d1d' : 
+                     notification.type === 'warning' ? '#92400e' : '#064e3b',
+              fontSize: '16px',
+              fontWeight: '600',
+              lineHeight: '1.5'
+            }}>
+              {notification.message}
+            </span>
           </div>
+          {(notification.type === 'error' || notification.type === 'warning') && (
+            <button
+              onClick={clearNotification}
+              style={{
+                background: notification.type === 'error' ? '#ef4444' : '#f59e0b',
+                border: 'none',
+                color: 'white',
+                fontSize: '16px',
+                cursor: 'pointer',
+                padding: '8px 12px',
+                borderRadius: '6px',
+                fontWeight: '600',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.target.style.opacity = '0.8'}
+              onMouseLeave={(e) => e.target.style.opacity = '1'}
+            >
+              ×
+            </button>
+          )}
         </div>
       )}
       <div style={{
@@ -267,7 +316,7 @@ function Dashboard({ setAuth }) {
             {['chatbots', 'upload', 'customize', 'deploy'].map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => handleTabChange(tab)}
                 style={{
                   padding: '12px 24px',
                   background: activeTab === tab ? '#667eea' : 'transparent',
