@@ -144,16 +144,14 @@ function Dashboard({ setAuth }) {
   };
 
   const widgetCode = selectedChatbot ? `<!-- Chatbot Widget -->
-<script>
-  window.chatbotConfig = {
-    chatbotId: "${selectedChatbot.id}",
-    color: "${chatbotColor}",
-    name: "${chatbotName}",
-    apiUrl: "${process.env.REACT_APP_API_URL || window.location.origin}"
-  };
-</script>
-<script src="${process.env.REACT_APP_API_URL || window.location.origin}/widget.js"></script>` : '';
-
+  <script>
+    window.chatbotConfig = {
+      chatbotId: "${selectedChatbot.id}",
+      apiUrl: "${process.env.REACT_APP_API_URL || window.location.origin}"
+    };
+  </script>
+  <script src="${process.env.REACT_APP_API_URL || window.location.origin}/widget.js"></script>` : '';
+  
   const handleCopyCode = () => {
     navigator.clipboard.writeText(widgetCode);
     setCopied(true);

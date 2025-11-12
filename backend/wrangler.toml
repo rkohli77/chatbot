@@ -10,6 +10,11 @@ port = 8787
 name = "chatbot-api-prod"
 
 [vars]
-NODE_ENV = "production"
+NODE_ENV = "development"
 # Secrets are set via: wrangler secret put <KEY_NAME>
-# SUPABASE_URL and SUPABASE_KEY are stored as secrets
+# For development, use .env file (not committed)
+
+[env.production.vars]
+NODE_ENV = "production"
+# Production secrets are set via: wrangler secret put <KEY_NAME>
+# Required secrets: SUPABASE_URL, SUPABASE_KEY, JWT_SECRET, OPENAI_API_KEY

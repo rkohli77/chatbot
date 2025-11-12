@@ -326,22 +326,63 @@ app.post('/api/chat', async (c) => {
   }
 });
 
+// Public chatbot config (no auth)
+app.get('/public/chatbots/:id', cors({ origin: '*' }), async (c) => {
+  try {
+    const chatbotId = c.req.param('id');
+    const supabase = c.get('supabase');
+
+    const { data, error } = await supabase
+      .from('chatbots')
+      .select('name,color,welcome_message,is_deployed')
+      .eq('id', chatbotId)
+      .single();
+
+    if (error || !data || !data.is_deployed) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+
+    return c.json({
+      name: data.name,
+      color: data.color,
+      welcomeMessage: data.welcome_message
+    });
+  } catch (err) {
+    return c.json({ error: 'Failed to load config' }, 500);
+  }
+});
+
 // Serve widget.js
 app.get('/widget.js', async (c) => {
-  const widgetCode = `
-(function() {
+  const widgetCode = `(async function() {
     if (!window.chatbotConfig) {
         console.error('Chatbot configuration not found!');
         return;
     }
 
-    const config = window.chatbotConfig;
-    if (!config.chatbotId || !config.apiUrl) {
+    const cfg = window.chatbotConfig;
+    if (!cfg.chatbotId || !cfg.apiUrl) {
         console.error('Missing required chatbot configuration!');
         return;
     }
 
-    // Create chatbot UI
+    let live = {};
+    try {
+        const res = await fetch(\`\${cfg.apiUrl}/public/chatbots/\${cfg.chatbotId}\`, { cache: 'no-store' });
+        if (res.ok) {
+            live = await res.json();
+        }
+    } catch (e) {
+        console.warn('Failed to fetch live chatbot settings, falling back to embed values.', e);
+    }
+
+    const config = {
+        ...cfg,
+        name: live.name || cfg.name || 'AI Chat',
+        color: live.color || cfg.color || '#667eea',
+        welcomeMessage: live.welcomeMessage || cfg.welcomeMessage
+    };
+
     const chatbotContainer = document.createElement('div');
     chatbotContainer.id = 'ai-chatbot-container';
     chatbotContainer.style.cssText = \`
@@ -354,7 +395,6 @@ app.get('/widget.js', async (c) => {
         align-items: flex-end;
     \`;
 
-    // Create chat window
     const chatWindow = document.createElement('div');
     chatWindow.id = 'ai-chatbot-window';
     chatWindow.style.cssText = \`
@@ -369,7 +409,6 @@ app.get('/widget.js', async (c) => {
         flex-direction: column;
     \`;
 
-    // Chat header
     const chatHeader = document.createElement('div');
     chatHeader.style.cssText = \`
         padding: 15px;
@@ -380,7 +419,6 @@ app.get('/widget.js', async (c) => {
     \`;
     chatHeader.textContent = config.name || 'AI Chat';
 
-    // Chat messages container
     const messagesContainer = document.createElement('div');
     messagesContainer.style.cssText = \`
         flex: 1;
@@ -392,7 +430,6 @@ app.get('/widget.js', async (c) => {
         background: #f9fafb;
     \`;
 
-    // Input container
     const inputContainer = document.createElement('div');
     inputContainer.style.cssText = \`
         padding: 15px;
@@ -426,7 +463,6 @@ app.get('/widget.js', async (c) => {
         cursor: pointer;
     \`;
 
-    // Toggle button
     const toggleButton = document.createElement('button');
     toggleButton.style.cssText = \`
         width: 60px;
@@ -444,34 +480,22 @@ app.get('/widget.js', async (c) => {
     \`;
     toggleButton.innerHTML = '💬';
 
-    // Assemble UI
     inputContainer.appendChild(input);
     inputContainer.appendChild(sendButton);
-
     chatWindow.appendChild(chatHeader);
     chatWindow.appendChild(messagesContainer);
     chatWindow.appendChild(inputContainer);
-
     chatbotContainer.appendChild(chatWindow);
     chatbotContainer.appendChild(toggleButton);
-
     document.body.appendChild(chatbotContainer);
 
-    // Event handlers
-    toggleButton.onclick = () => {
-        const isVisible = chatWindow.style.display === 'flex';
-        chatWindow.style.display = isVisible ? 'none' : 'flex';
-        if (!isVisible) input.focus();
-    };
-
-    // Message handling
     function addMessage(text, isUser = false) {
         const message = document.createElement('div');
         message.style.cssText = \`
             padding: 10px 15px;
             border-radius: 10px;
             max-width: 80%;
-            \${isUser ? 'background: ' + config.color + '; color: white; align-self: flex-end;' 
+            \${isUser ? 'background: ' + (config.color || '#667eea') + '; color: white; align-self: flex-end;' 
                     : 'background: white; border: 1px solid #e5e7eb; align-self: flex-start;'}
             font-family: system-ui, -apple-system, sans-serif;
             font-size: 14px;
@@ -522,12 +546,19 @@ app.get('/widget.js', async (c) => {
         if (e.key === 'Enter') sendMessage(input.value);
     };
 
-    // Add welcome message if provided
-    if (config.welcomeMessage) {
-        addMessage(config.welcomeMessage);
-    }
-})();
-  `;
+    let welcomeShown = false;
+    toggleButton.onclick = () => {
+        const isVisible = chatWindow.style.display === 'flex';
+        chatWindow.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            input.focus();
+            if (!welcomeShown && config.welcomeMessage) {
+                addMessage(config.welcomeMessage);
+                welcomeShown = true;
+            }
+        }
+    };
+})();`;
   
   return c.text(widgetCode, 200, {
     'Content-Type': 'application/javascript',

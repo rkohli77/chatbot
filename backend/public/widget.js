@@ -1,15 +1,33 @@
-(function() {
+(async function() {
     // Configuration validation
     if (!window.chatbotConfig) {
         console.error('Chatbot configuration not found!');
         return;
     }
 
-    const config = window.chatbotConfig;
-    if (!config.chatbotId || !config.apiUrl) {
+    const cfg = window.chatbotConfig;
+    if (!cfg.chatbotId || !cfg.apiUrl) {
         console.error('Missing required chatbot configuration!');
         return;
     }
+
+    // Load live settings
+    let live = {};
+    try {
+        const res = await fetch(`${cfg.apiUrl}/public/chatbots/${cfg.chatbotId}`, { cache: 'no-store' });
+        if (res.ok) {
+            live = await res.json();
+        }
+    } catch (e) {
+        console.warn('Failed to fetch live chatbot settings, falling back to embed values.', e);
+    }
+
+    const config = {
+        ...cfg,
+        name: live.name || cfg.name || 'AI Chat',
+        color: live.color || cfg.color || '#667eea',
+        welcomeMessage: live.welcomeMessage || cfg.welcomeMessage
+    };
 
     // Create chatbot UI
     const chatbotContainer = document.createElement('div');
@@ -192,8 +210,18 @@
         if (e.key === 'Enter') sendMessage(input.value);
     };
 
-    // Add welcome message if provided
-    if (config.welcomeMessage) {
-        addMessage(config.welcomeMessage);
-    }
-})();
+    // Show welcome message when chat opens
+    let welcomeShown = false;
+    const originalToggle = toggleButton.onclick;
+    toggleButton.onclick = () => {
+        const isVisible = chatWindow.style.display === 'flex';
+        chatWindow.style.display = isVisible ? 'none' : 'flex';
+        if (!isVisible) {
+            input.focus();
+            if (!welcomeShown && config.welcomeMessage) {
+                addMessage(config.welcomeMessage);
+                welcomeShown = true;
+            }
+        }
+    };
+})(); 
