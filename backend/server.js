@@ -239,6 +239,30 @@ app.put('/api/chatbots/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Public chatbot config (no auth) for widget to load live settings
+app.get('/public/chatbots/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('chatbots')
+      .select('name,color,welcome_message,is_deployed')
+      .eq('id', id)
+      .single();
+
+    if (error || !data || !data.is_deployed) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+
+    res.json({
+      name: data.name,
+      color: data.color,
+      welcomeMessage: data.welcome_message
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load config' });
+  }
+});
+
 // === DOCUMENTS ===
 app.get('/api/chatbots/:id/documents', authenticateToken, async (req, res) => {
   try {

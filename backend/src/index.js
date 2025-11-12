@@ -326,211 +326,269 @@ app.post('/api/chat', async (c) => {
   }
 });
 
+// Public chatbot config (no auth)
+app.get('/public/chatbots/:id', async (c) => {
+  try {
+    const chatbotId = c.req.param('id');
+    const supabase = c.get('supabase');
+
+    const { data, error } = await supabase
+      .from('chatbots')
+      .select('name,color,welcome_message,is_deployed')
+      .eq('id', chatbotId)
+      .single();
+
+    if (error || !data || !data.is_deployed) {
+      return c.json({ error: 'Not found' }, 404);
+    }
+
+    return c.json({
+      name: data.name,
+      color: data.color,
+      welcomeMessage: data.welcome_message
+    });
+  } catch (err) {
+    return c.json({ error: 'Failed to load config' }, 500);
+  }
+});
+
 // Serve widget.js
 app.get('/widget.js', async (c) => {
   const widgetCode = `
-(function() {
-    if (!window.chatbotConfig) {
-        console.error('Chatbot configuration not found!');
-        return;
+(async function() {
+  if (!window.chatbotConfig) {
+    console.error('Chatbot configuration not found!');
+    return;
+  }
+  const cfg = window.chatbotConfig;
+  if (!cfg.chatbotId || !cfg.apiUrl) {
+    console.error('Missing required chatbot configuration!');
+    return;
+  }
+
+  // Load live settings
+  let live = {};
+  try {
+    const res = await fetch(\`\${cfg.apiUrl}/public/chatbots/\${cfg.chatbotId}\`, { cache: 'no-store' });
+    if (res.ok) {
+      live = await res.json();
     }
+  } catch (e) {
+    console.warn('Failed to fetch live chatbot settings, falling back to embed values.', e);
+  }
 
-    const config = window.chatbotConfig;
-    if (!config.chatbotId || !config.apiUrl) {
-        console.error('Missing required chatbot configuration!');
-        return;
-    }
+  const config = {
+    ...cfg,
+    name: live.name || cfg.name || 'AI Chat',
+    color: live.color || cfg.color || '#667eea',
+    welcomeMessage: live.welcomeMessage || cfg.welcomeMessage
+  };
 
-    // Create chatbot UI
-    const chatbotContainer = document.createElement('div');
-    chatbotContainer.id = 'ai-chatbot-container';
-    chatbotContainer.style.cssText = \`
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1000;
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-    \`;
+  // ... rest of existing widget code, but use "config" for name/color/welcomeMessage ...
+  const chatbotContainer = document.createElement('div');
+  chatbotContainer.id = 'ai-chatbot-container';
+  chatbotContainer.style.cssText = \`
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+  \`;
 
-    // Create chat window
-    const chatWindow = document.createElement('div');
-    chatWindow.id = 'ai-chatbot-window';
-    chatWindow.style.cssText = \`
-        display: none;
-        width: 350px;
-        height: 500px;
-        background: white;
+  const chatWindow = document.createElement('div');
+  chatWindow.id = 'ai-chatbot-window';
+  chatWindow.style.cssText = \`
+      display: none;
+      width: 350px;
+      height: 500px;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      margin-bottom: 10px;
+      overflow: hidden;
+      flex-direction: column;
+  \`;
+
+  const chatHeader = document.createElement('div');
+  chatHeader.style.cssText = \`
+      padding: 15px;
+      background: \${config.color};
+      color: white;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-weight: 600;
+  \`;
+  chatHeader.textContent = config.name;
+
+  const messagesContainer = document.createElement('div');
+  messagesContainer.style.cssText = \`
+      flex: 1;
+      padding: 15px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      background: #f9fafb;
+  \`;
+
+  const inputContainer = document.createElement('div');
+  inputContainer.style.cssText = \`
+      padding: 15px;
+      border-top: 1px solid #e5e7eb;
+      display: flex;
+      gap: 10px;
+      background: white;
+  \`;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Type your message...';
+  input.style.cssText = \`
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+  \`;
+
+  const sendButton = document.createElement('button');
+  sendButton.textContent = 'Send';
+  sendButton.style.cssText = \`
+      padding: 8px 16px;
+      background: \${config.color};
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: 600;
+      cursor: pointer;
+  \`;
+
+  const toggleButton = document.createElement('button');
+  toggleButton.style.cssText = \`
+      width: 60px;
+      height: 60px;
+      border-radius: 30px;
+      background: \${config.color};
+      color: white;
+      border: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+  \`;
+  toggleButton.innerHTML = '💬';
+
+  inputContainer.appendChild(input);
+  inputContainer.appendChild(sendButton);
+
+  chatWindow.appendChild(chatHeader);
+  chatWindow.appendChild(messagesContainer);
+  chatWindow.appendChild(inputContainer);
+
+  chatbotContainer.appendChild(chatWindow);
+  chatbotContainer.appendChild(toggleButton);
+
+  document.body.appendChild(chatbotContainer);
+
+  toggleButton.onclick = () => {
+    const isVisible = chatWindow.style.display === 'flex';
+    chatWindow.style.display = isVisible ? 'none' : 'flex';
+    if (!isVisible) input.focus();
+  };
+
+  function addMessage(text, isUser = false) {
+    const message = document.createElement('div');
+    message.style.cssText = \`
+        padding: 10px 15px;
         border-radius: 10px;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        margin-bottom: 10px;
-        overflow: hidden;
-        flex-direction: column;
-    \`;
-
-    // Chat header
-    const chatHeader = document.createElement('div');
-    chatHeader.style.cssText = \`
-        padding: 15px;
-        background: \${config.color || '#667eea'};
-        color: white;
+        max-width: 80%;
+        \${isUser ? 'background: ' + config.color + '; color: white; align-self: flex-end;'
+                  : 'background: white; border: 1px solid #e5e7eb; align-self: flex-start;'}
         font-family: system-ui, -apple-system, sans-serif;
-        font-weight: 600;
-    \`;
-    chatHeader.textContent = config.name || 'AI Chat';
-
-    // Chat messages container
-    const messagesContainer = document.createElement('div');
-    messagesContainer.style.cssText = \`
-        flex: 1;
-        padding: 15px;
-        overflow-y: auto;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        background: #f9fafb;
-    \`;
-
-    // Input container
-    const inputContainer = document.createElement('div');
-    inputContainer.style.cssText = \`
-        padding: 15px;
-        border-top: 1px solid #e5e7eb;
-        display: flex;
-        gap: 10px;
-        background: white;
-    \`;
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = 'Type your message...';
-    input.style.cssText = \`
-        flex: 1;
-        padding: 8px 12px;
-        border: 1px solid #d1d5db;
-        border-radius: 6px;
         font-size: 14px;
-        outline: none;
     \`;
+    message.textContent = text;
+    messagesContainer.appendChild(message);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }
 
-    const sendButton = document.createElement('button');
-    sendButton.textContent = 'Send';
-    sendButton.style.cssText = \`
-        padding: 8px 16px;
-        background: \${config.color || '#667eea'};
-        color: white;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
-        cursor: pointer;
-    \`;
+  async function sendMessage(text) {
+    if (!text.trim()) return;
+    addMessage(text, true);
+    input.value = '';
+    input.disabled = true;
+    sendButton.disabled = true;
 
-    // Toggle button
-    const toggleButton = document.createElement('button');
-    toggleButton.style.cssText = \`
-        width: 60px;
-        height: 60px;
-        border-radius: 30px;
-        background: \${config.color || '#667eea'};
-        color: white;
-        border: none;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 24px;
-    \`;
-    toggleButton.innerHTML = '💬';
-
-    // Assemble UI
-    inputContainer.appendChild(input);
-    inputContainer.appendChild(sendButton);
-
-    chatWindow.appendChild(chatHeader);
-    chatWindow.appendChild(messagesContainer);
-    chatWindow.appendChild(inputContainer);
-
-    chatbotContainer.appendChild(chatWindow);
-    chatbotContainer.appendChild(toggleButton);
-
-    document.body.appendChild(chatbotContainer);
-
-    // Event handlers
-    toggleButton.onclick = () => {
-        const isVisible = chatWindow.style.display === 'flex';
-        chatWindow.style.display = isVisible ? 'none' : 'flex';
-        if (!isVisible) input.focus();
-    };
-
-    // Message handling
-    function addMessage(text, isUser = false) {
-        const message = document.createElement('div');
-        message.style.cssText = \`
-            padding: 10px 15px;
-            border-radius: 10px;
-            max-width: 80%;
-            \${isUser ? 'background: ' + config.color + '; color: white; align-self: flex-end;' 
-                    : 'background: white; border: 1px solid #e5e7eb; align-self: flex-start;'}
-            font-family: system-ui, -apple-system, sans-serif;
-            font-size: 14px;
-        \`;
-        message.textContent = text;
-        messagesContainer.appendChild(message);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    try {
+      const response = await fetch(\`\${config.apiUrl}/api/chat\`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatbotId: config.chatbotId, message: text })
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      addMessage(data.response);
+    } catch (error) {
+      addMessage('Sorry, I encountered an error. Please try again later.');
+      console.error('Chat error:', error);
+    } finally {
+      input.disabled = false;
+      sendButton.disabled = false;
+      input.focus();
     }
+  }
 
-    async function sendMessage(text) {
-        if (!text.trim()) return;
-        
-        addMessage(text, true);
-        input.value = '';
-        input.disabled = true;
-        sendButton.disabled = true;
+  sendButton.onclick = () => sendMessage(input.value);
+  input.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(input.value); };
 
-        try {
-            const response = await fetch(\`\${config.apiUrl}/api/chat\`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    chatbotId: config.chatbotId,
-                    message: text
-                })
-            });
-
-            const data = await response.json();
-            if (data.error) {
-                throw new Error(data.error);
-            }
-
-            addMessage(data.response);
-        } catch (error) {
-            addMessage('Sorry, I encountered an error. Please try again later.');
-            console.error('Chat error:', error);
-        } finally {
-            input.disabled = false;
-            sendButton.disabled = false;
-            input.focus();
-        }
-    }
-
-    sendButton.onclick = () => sendMessage(input.value);
-    input.onkeypress = (e) => {
-        if (e.key === 'Enter') sendMessage(input.value);
-    };
-
-    // Add welcome message if provided
-    if (config.welcomeMessage) {
+  // Show welcome message when chat opens
+  let welcomeShown = false;
+  const originalToggle = toggleButton.onclick;
+  toggleButton.onclick = () => {
+    const isVisible = chatWindow.style.display === 'flex';
+    chatWindow.style.display = isVisible ? 'none' : 'flex';
+    if (!isVisible) {
+      input.focus();
+      if (!welcomeShown && config.welcomeMessage) {
         addMessage(config.welcomeMessage);
+        welcomeShown = true;
+      }
     }
+  };t.disabled = true;
+    sendButton.disabled = true;
+
+    try {
+      const response = await fetch(\`\${config.apiUrl}/api/chat\`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chatbotId: config.chatbotId, message: text })
+      });
+      const data = await response.json();
+      if (data.error) throw new Error(data.error);
+      addMessage(data.response);
+    } catch (error) {
+      addMessage('Sorry, I encountered an error. Please try again later.');
+      console.error('Chat error:', error);
+    } finally {
+      input.disabled = false;
+      sendButton.disabled = false;
+      input.focus();
+    }
+  }
+
+  sendButton.onclick = () => sendMessage(input.value);
+  input.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(input.value); };
+
+  if (config.welcomeMessage) addMessage(config.welcomeMessage);
 })();
   `;
-  
-  return c.text(widgetCode, 200, {
+  return c.text(widgetCode, 200, { 
     'Content-Type': 'application/javascript',
+    'Cache-Control': 'no-cache'
   });
 });
 
