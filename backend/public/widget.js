@@ -239,10 +239,14 @@
 
             const data = await response.json();
             if (data.error) {
-                throw new Error(data.error);
+                if (data.error.includes('training data')) {
+                    addMessage("I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance.");
+                } else {
+                    throw new Error(data.error);
+                }
+            } else {
+                addMessage(data.response);
             }
-
-            addMessage(data.response);
         } catch (error) {
             addMessage('Sorry, I encountered an error. Please try again later.');
             console.error('Chat error:', error);

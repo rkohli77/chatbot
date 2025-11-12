@@ -292,7 +292,7 @@ app.post('/api/chat', async (c) => {
       .eq('chatbot_id', chatbotId);
 
     if (!documents || documents.length === 0) {
-      return c.json({ error: 'No training data found for this chatbot' }, 404);
+      return c.json({ response: "I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance." });
     }
 
     const context = documents.map(doc => doc.content).join('\\n\\n');
@@ -575,10 +575,14 @@ app.get('/widget.js', async (c) => {
 
             const data = await response.json();
             if (data.error) {
-                throw new Error(data.error);
+                if (data.error.includes('training data')) {
+                    addMessage("I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance.");
+                } else {
+                    throw new Error(data.error);
+                }
+            } else {
+                addMessage(data.response);
             }
-
-            addMessage(data.response);
         } catch (error) {
             addMessage('Sorry, I encountered an error. Please try again later.');
             console.error('Chat error:', error);
