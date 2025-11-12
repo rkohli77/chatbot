@@ -327,7 +327,7 @@ app.post('/api/chat', async (c) => {
 });
 
 // Public chatbot config (no auth)
-app.get('/public/chatbots/:id', async (c) => {
+app.get('/public/chatbots/:id', cors({ origin: '*' }), async (c) => {
   try {
     const chatbotId = c.req.param('id');
     const supabase = c.get('supabase');
