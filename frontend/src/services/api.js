@@ -19,8 +19,12 @@ api.interceptors.request.use(config => {
 });
 
 export const auth = {
-  register: (email, password) => api.post('/api/auth/register', { email, password }),
+  register: (data) => api.post('/api/auth/register', data),
   login: (email, password) => api.post('/api/auth/login', { email, password })
+};
+
+export const user = {
+  getProfile: () => api.get('/api/user/profile')
 };
 
 export const chatbots = {

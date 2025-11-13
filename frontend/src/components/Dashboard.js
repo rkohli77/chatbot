@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { chatbots, documents } from '../services/api';
+import { user, chatbots, documents } from '../services/api';
 
 function Dashboard({ setAuth }) {
   const navigate = useNavigate();
@@ -11,6 +11,7 @@ function Dashboard({ setAuth }) {
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [notification, setNotification] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
 
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
@@ -29,6 +30,15 @@ function Dashboard({ setAuth }) {
   const [welcomeMessage, setWelcomeMessage] = useState('Hi! How can I help you today?');
   const [showNewBotForm, setShowNewBotForm] = useState(false);
 
+  const loadUserProfile = useCallback(async () => {
+    try {
+      const response = await user.getProfile();
+      setUserProfile(response.data);
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+    }
+  }, []);
+
   const loadChatbots = useCallback(async () => {
     try {
       const response = await chatbots.getAll();
@@ -44,8 +54,9 @@ function Dashboard({ setAuth }) {
   }, [selectedChatbot]);
 
   useEffect(() => {
+    loadUserProfile();
     loadChatbots();
-  }, [loadChatbots]);
+  }, [loadUserProfile, loadChatbots]);
 
   useEffect(() => {
     if (selectedChatbot) {
@@ -270,6 +281,21 @@ function Dashboard({ setAuth }) {
             marginBottom: '16px'
           }}>
             <div>
+              <div style={{
+                fontSize: '18px',
+                color: '#667eea',
+                fontWeight: '500',
+                marginBottom: '8px'
+              }}>
+                {(() => {
+                  const hour = new Date().getHours();
+                  const greeting = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+                  const name = userProfile?.first_name && userProfile?.last_name ? 
+                    `${userProfile.first_name.charAt(0).toUpperCase() + userProfile.first_name.slice(1)} ${userProfile.last_name.charAt(0).toUpperCase() + userProfile.last_name.slice(1)}` : 
+                    'There';
+                  return `${greeting}, ${name}!`;
+                })()} 
+              </div>
               <h1 style={{
                 fontSize: '32px',
                 fontWeight: 'bold',
@@ -479,36 +505,107 @@ function Dashboard({ setAuth }) {
                   <p>Click "New Chatbot" to create your first one</p>
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
-                  {allChatbots.map(bot => (
-                    <div
-                      key={bot.id}
-                      onClick={() => setSelectedChatbot(bot)}
-                      style={{
-                        padding: '24px',
-                        border: selectedChatbot?.id === bot.id ? `3px solid ${bot.color}` : '1px solid #e5e7eb',
-                        borderRadius: '12px',
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        background: selectedChatbot?.id === bot.id ? '#f0f9ff' : 'white'
-                      }}
-                    >
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+                    {allChatbots.map(bot => (
+                      <div
+                        key={bot.id}
+                        onClick={() => setSelectedChatbot(bot)}
+                        style={{
+                          padding: '24px',
+                          border: selectedChatbot?.id === bot.id ? `3px solid ${bot.color}` : '1px solid #e5e7eb',
+                          borderRadius: '12px',
+                          cursor: 'pointer',
+                          transition: 'all 0.2s',
+                          background: selectedChatbot?.id === bot.id ? '#f0f9ff' : 'white'
+                        }}
+                      >
+                        <div style={{
+                          width: '48px',
+                          height: '48px',
+                          borderRadius: '12px',
+                          background: bot.color,
+                          marginBottom: '16px'
+                        }}></div>
+                        <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', color: '#1f2937' }}>
+                          {bot.name}
+                        </h3>
+                        <p style={{ fontSize: '14px', color: '#6b7280', margin: 0 }}>
+                          {bot.is_deployed ? '✓ Deployed' : 'Not deployed'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {(() => {
+                    // Debug: Always show a message to test
+                    if (!userProfile) {
+                      return (
+                        <div style={{
+                          marginTop: '24px',
+                          padding: '16px',
+                          background: '#e0e7ff',
+                          border: '1px solid #c7d2fe',
+                          borderRadius: '8px',
+                          color: '#3730a3',
+                          textAlign: 'center'
+                        }}>
+                          Loading trial information...
+                        </div>
+                      );
+                    }
+                    
+                    if (!userProfile.trial_ends_at) {
+                      return (
+                        <div style={{
+                          marginTop: '24px',
+                          padding: '16px',
+                          background: '#e0e7ff',
+                          border: '1px solid #c7d2fe',
+                          borderRadius: '8px',
+                          color: '#3730a3',
+                          textAlign: 'center'
+                        }}>
+                          No trial data found.
+                        </div>
+                      );
+                    }
+                    
+                    const trialEndsAt = new Date(userProfile.trial_ends_at);
+                    const now = new Date();
+                    const daysLeft = Math.ceil((trialEndsAt - now) / (1000 * 60 * 60 * 24));
+                    
+                    if (daysLeft <= 0) {
+                      return (
+                        <div style={{
+                          marginTop: '24px',
+                          padding: '16px',
+                          background: '#fee2e2',
+                          border: '1px solid #fecaca',
+                          borderRadius: '8px',
+                          color: '#991b1b',
+                          textAlign: 'center'
+                        }}>
+                          ⚠️ Your trial has expired. Upgrade to continue using your chatbots.
+                        </div>
+                      );
+                    }
+                    
+                    return (
                       <div style={{
-                        width: '48px',
-                        height: '48px',
-                        borderRadius: '12px',
-                        background: bot.color,
-                        marginBottom: '16px'
-                      }}></div>
-                      <h3 style={{ fontSize: '18px', fontWeight: '600', marginBottom: '8px', color: '#1f2937' }}>
-                        {bot.name}
-                      </h3>
-                      <p style={{ fontSize: '14px', color: '#6b7280', margin: 0 }}>
-                        {bot.is_deployed ? '✓ Deployed' : 'Not deployed'}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                        marginTop: '24px',
+                        padding: '16px',
+                        background: '#fef3c7',
+                        border: '1px solid #fed7aa',
+                        borderRadius: '8px',
+                        color: '#92400e',
+                        textAlign: 'center'
+                      }}>
+                        ⏰ Your trial ends in {daysLeft} day{daysLeft !== 1 ? 's' : ''}.
+                      </div>
+                    );
+                  })()} 
+                </>
               )}
             </div>
           )}

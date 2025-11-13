@@ -23,6 +23,11 @@ app.use('/api/chatbots/*', cors({
   credentials: true,
 }));
 
+app.use('/api/user/*', cors({
+  origin: allowedOrigins,
+  credentials: true,
+}));
+
 // CORS for public routes (widget)
 app.use('/api/chat', cors({
   origin: '*',
@@ -69,9 +74,28 @@ app.get('/', (c) => c.json({ message: 'Chatbot API (Cloudflare)', version: '3.4.
 // === AUTH ROUTES ===
 app.post('/api/auth/register', async (c) => {
   try {
-    const { email, password } = await c.req.json();
-    if (!email || !password) {
-      return c.json({ error: 'Email and password required' }, 400);
+    const { firstName, lastName, companyName, email, password } = await c.req.json();
+    
+    // Validate required fields
+    if (!firstName?.trim() || !lastName?.trim() || !email || !password) {
+      return c.json({ error: 'First name, last name, email and password required' }, 400);
+    }
+    
+    // Validate name fields (letters, spaces, hyphens, apostrophes only)
+    const nameRegex = /^[a-zA-Z\s\-']{1,50}$/;
+    if (!nameRegex.test(firstName.trim())) {
+      return c.json({ error: 'First name contains invalid characters or is too long' }, 400);
+    }
+    if (!nameRegex.test(lastName.trim())) {
+      return c.json({ error: 'Last name contains invalid characters or is too long' }, 400);
+    }
+    
+    // Validate company name if provided (alphanumeric, spaces, common business chars)
+    if (companyName?.trim()) {
+      const companyRegex = /^[a-zA-Z0-9\s\-'&.,()]{2,100}$/;
+      if (!companyRegex.test(companyName.trim())) {
+        return c.json({ error: 'Company name contains invalid characters or invalid length' }, 400);
+      }
     }
 
     const supabase = c.get('supabase');
@@ -86,9 +110,19 @@ app.post('/api/auth/register', async (c) => {
     }
 
     const hash = await bcrypt.hash(password, 10);
+    const trialEndsAt = new Date();
+    trialEndsAt.setDate(trialEndsAt.getDate() + 14); // 14-day trial
+    
     const { data, error } = await supabase
       .from('users')
-      .insert([{ email: email.toLowerCase(), password_hash: hash }])
+      .insert([{ 
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
+        company_name: companyName?.trim() || null,
+        email: email.toLowerCase(), 
+        password_hash: hash,
+        trial_ends_at: trialEndsAt.toISOString()
+      }])
       .select()
       .single();
 
@@ -99,7 +133,16 @@ app.post('/api/auth/register', async (c) => {
       String(c.env.JWT_SECRET)
     );
 
-    return c.json({ token, user: { id: data.id, email: data.email } });
+    return c.json({ 
+      token, 
+      user: { 
+        id: data.id, 
+        email: data.email,
+        first_name: data.first_name,
+        last_name: data.last_name,
+        trial_ends_at: data.trial_ends_at
+      } 
+    });
   } catch (error) {
     return c.json({ error: error.message }, 500);
   }
@@ -133,7 +176,35 @@ app.post('/api/auth/login', async (c) => {
       String(c.env.JWT_SECRET)
     );
 
-    return c.json({ token, user: { id: users.id, email: users.email } });
+    return c.json({ 
+      token, 
+      user: { 
+        id: users.id, 
+        email: users.email,
+        first_name: users.first_name,
+        last_name: users.last_name,
+        trial_ends_at: users.trial_ends_at
+      } 
+    });
+  } catch (error) {
+    return c.json({ error: error.message }, 500);
+  }
+});
+
+// === USER PROFILE ===
+app.get('/api/user/profile', authenticateToken, async (c) => {
+  try {
+    const user = c.get('user');
+    const supabase = c.get('supabase');
+    
+    const { data, error } = await supabase
+      .from('users')
+      .select('id,email,first_name,last_name,trial_ends_at')
+      .eq('id', user.userId)
+      .single();
+      
+    if (error) throw error;
+    return c.json(data);
   } catch (error) {
     return c.json({ error: error.message }, 500);
   }
