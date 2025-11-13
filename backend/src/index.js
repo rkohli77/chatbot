@@ -439,11 +439,14 @@ app.get('/widget.js', async (c) => {
 
     let live = {};
     try {
-        const res = await fetch(\`\${cfg.apiUrl}/public/chatbots/\${cfg.chatbotId}\`, { cache: 'no-store' });
+        const apiUrl = \`\${cfg.apiUrl}/public/chatbots/\${cfg.chatbotId}\`;
+        console.log('Fetching chatbot config from:', apiUrl);
+        const res = await fetch(apiUrl, { cache: 'no-store' });
         if (res.ok) {
             live = await res.json();
+            console.log('Chatbot config loaded successfully');
         } else {
-            console.log('Chatbot not deployed or not found');
+            console.log(\`Chatbot not deployed or not found. Status: \${res.status}, ID: \${cfg.chatbotId}\`);
             return;
         }
     } catch (e) {
@@ -624,6 +627,27 @@ app.get('/widget.js', async (c) => {
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
+    function addTypingIndicator() {
+        const typing = document.createElement('div');
+        typing.id = 'typing-indicator';
+        typing.style.cssText = \`
+            padding: 10px 15px;
+            border-radius: 10px;
+            max-width: 80%;
+            background: white;
+            border: 1px solid #e5e7eb;
+            align-self: flex-start;
+            font-family: system-ui, -apple-system, sans-serif;
+            font-size: 14px;
+            color: #6b7280;
+            font-style: italic;
+        \`;
+        typing.textContent = 'Agent is typing...';
+        messagesContainer.appendChild(typing);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        return typing;
+    }
+
     async function sendMessage(text) {
         if (!text.trim()) return;
         
@@ -631,6 +655,8 @@ app.get('/widget.js', async (c) => {
         input.value = '';
         input.disabled = true;
         sendButton.disabled = true;
+        
+        const typingIndicator = addTypingIndicator();
 
         try {
             const response = await fetch(\`\${config.apiUrl}/api/chat\`, {
@@ -645,6 +671,8 @@ app.get('/widget.js', async (c) => {
             });
 
             const data = await response.json();
+            typingIndicator.remove();
+            
             if (data.error) {
                 if (data.error.includes('training data')) {
                     addMessage("I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance.");
@@ -655,6 +683,7 @@ app.get('/widget.js', async (c) => {
                 addMessage(data.response);
             }
         } catch (error) {
+            typingIndicator.remove();
             addMessage('Sorry, I encountered an error. Please try again later.');
             console.error('Chat error:', error);
         } finally {
