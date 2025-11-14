@@ -14,6 +14,11 @@ NODE_ENV = "development"
 # Secrets are set via: wrangler secret put <KEY_NAME>
 # For development, use .env file (not committed)
 
+# KV namespace for caching
+[[kv_namespaces]]
+binding = "CHATBOT_CACHE"
+id = "ff83fa4c0ff2491288cf9316ddcdef80"
+
 [env.production.vars]
 NODE_ENV = "production"
 # Production secrets are set via: wrangler secret put <KEY_NAME>

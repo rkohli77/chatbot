@@ -4,6 +4,134 @@ import { createClient } from '@supabase/supabase-js';
 import bcrypt from 'bcryptjs';
 import jwt from '@tsndr/cloudflare-worker-jwt';
 
+// Input sanitization functions
+function sanitizeInput(input) {
+  if (typeof input !== 'string') return input;
+  return input
+    .replace(/[<>"'&]/g, (match) => {
+      const entities = { '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#x27;', '&': '&amp;' };
+      return entities[match];
+    })
+    .trim()
+    .slice(0, 1000); // Limit length
+}
+
+function validateChatbotData(data) {
+  return {
+    name: sanitizeInput(data.name),
+    color: /^#[0-9A-Fa-f]{6}$/.test(data.color) ? data.color : '#667eea',
+    welcomeMessage: sanitizeInput(data.welcomeMessage)
+  };
+}
+
+function logSecurityEvent(c, event, details) {
+  console.warn(`[SECURITY] ${event}:`, {
+    timestamp: new Date().toISOString(),
+    ip: c.req.header('cf-connecting-ip') || 'unknown',
+    userAgent: c.req.header('user-agent'),
+    ...details
+  });
+}
+
+async function logError(c, error, context) {
+  const errorLog = {
+    timestamp: new Date().toISOString(),
+    error: error.message,
+    stack: error.stack,
+    context,
+    ip: c.req.header('cf-connecting-ip'),
+    userAgent: c.req.header('user-agent'),
+    url: c.req.url,
+    method: c.req.method,
+    severity: 'error'
+  };
+  
+  // Always log to Cloudflare console
+  console.error('[ERROR]', errorLog);
+  
+  // Send to external monitoring services
+  try {
+    // 1. Sentry (if configured)
+    if (c.env.SENTRY_DSN) {
+      await fetch('https://sentry.io/api/store/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Sentry-Auth': `Sentry sentry_key=${c.env.SENTRY_KEY}`
+        },
+        body: JSON.stringify({
+          message: error.message,
+          level: 'error',
+          extra: errorLog
+        })
+      });
+    }
+    
+    // 2. Custom webhook (Slack, Discord, etc.)
+    if (c.env.ERROR_WEBHOOK_URL) {
+      await fetch(c.env.ERROR_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: `🚨 Chatbot API Error: ${error.message}`,
+          attachments: [{
+            color: 'danger',
+            fields: [
+              { title: 'Context', value: context, short: true },
+              { title: 'IP', value: errorLog.ip, short: true },
+              { title: 'URL', value: errorLog.url, short: false }
+            ]
+          }]
+        })
+      });
+    }
+    
+    // 3. Database logging for critical errors
+    if (context === 'CHAT_PROCESSING' || context === 'AUTH_FAILURE' || context === 'CHATBOT_CREATE') {
+      const supabase = c.get('supabase');
+      const user = c.get('user');
+      await supabase.from('error_logs').insert([{
+        error_message: error.message,
+        context,
+        user_id: user?.userId || null,
+        ip: errorLog.ip,
+        user_agent: errorLog.userAgent,
+        url: errorLog.url,
+        created_at: new Date().toISOString()
+      }]);
+    }
+  } catch (monitoringError) {
+    console.error('[MONITORING_ERROR]', monitoringError.message);
+  }
+}
+
+async function logActivity(c, action, details = {}) {
+  const activityLog = {
+    timestamp: new Date().toISOString(),
+    action,
+    ip: c.req.header('cf-connecting-ip'),
+    ...details
+  };
+  
+  console.log(`[ACTIVITY] ${action}:`, activityLog);
+  
+  // Log important activities to database for audit trail
+  if (['ACCOUNT_DELETED', 'DATA_EXPORT', 'PRIVACY_SETTINGS_UPDATED'].includes(action)) {
+    try {
+      const supabase = c.get('supabase');
+      await supabase.from('activity_logs').insert([{
+        action,
+        user_id: details.userId,
+        ip: activityLog.ip,
+        details: JSON.stringify(details),
+        created_at: new Date().toISOString()
+      }]);
+    } catch (error) {
+      console.error('[ACTIVITY_LOG_ERROR]', error.message);
+    }
+  }
+}
+
 const app = new Hono();
 
 // CORS configuration
@@ -29,13 +157,61 @@ app.use('/api/user/*', cors({
 }));
 
 // CORS for public routes (widget)
-app.use('/api/chat', cors({
-  origin: '*',
-}));
+app.use('/api/chat', cors({ origin: '*' }));
+app.use('/widget.js', cors({ origin: '*' }));
 
-app.use('/widget.js', cors({
-  origin: '*',
-}));
+// Cache utilities
+async function getFromCache(c, key) {
+  try {
+    const cached = await c.env.CHATBOT_CACHE?.get(key);
+    return cached ? JSON.parse(cached) : null;
+  } catch (error) {
+    console.warn('[CACHE_READ_ERROR]', error.message);
+    return null;
+  }
+}
+
+async function setCache(c, key, value, ttl = 300) {
+  try {
+    await c.env.CHATBOT_CACHE?.put(key, JSON.stringify(value), { expirationTtl: ttl });
+  } catch (error) {
+    console.warn('[CACHE_WRITE_ERROR]', error.message);
+  }
+}
+
+// Rate limiting
+async function checkRateLimit(c, key, limit = 100, window = 3600) {
+  try {
+    const rateLimitKey = `rate:${key}`;
+    const current = await c.env.CHATBOT_CACHE?.get(rateLimitKey);
+    const count = current ? parseInt(current) : 0;
+    
+    if (count >= limit) {
+      return false;
+    }
+    
+    await c.env.CHATBOT_CACHE?.put(rateLimitKey, String(count + 1), { expirationTtl: window });
+    return true;
+  } catch (error) {
+    console.warn('[RATE_LIMIT_ERROR]', error.message);
+    return true; // Allow on error
+  }
+}
+
+// Rate limiting middleware
+const rateLimitMiddleware = (limit = 100, window = 3600) => {
+  return async (c, next) => {
+    const ip = c.req.header('cf-connecting-ip') || 'unknown';
+    const allowed = await checkRateLimit(c, ip, limit, window);
+    
+    if (!allowed) {
+      logSecurityEvent(c, 'RATE_LIMIT_EXCEEDED', { ip, limit, window });
+      return c.json({ error: 'Rate limit exceeded. Please try again later.' }, 429);
+    }
+    
+    await next();
+  };
+};
 
 // Middleware to initialize Supabase
 app.use('*', async (c, next) => {
@@ -199,14 +375,91 @@ app.get('/api/user/profile', authenticateToken, async (c) => {
     
     const { data, error } = await supabase
       .from('users')
-      .select('id,email,first_name,last_name,trial_ends_at')
+      .select('id,email,first_name,last_name,trial_ends_at,data_processing_consent,marketing_consent')
       .eq('id', user.userId)
       .single();
       
     if (error) throw error;
+    logActivity(c, 'PROFILE_ACCESS', { userId: user.userId });
     return c.json(data);
   } catch (error) {
+    logError(c, error, 'USER_PROFILE');
     return c.json({ error: error.message }, 500);
+  }
+});
+
+// === GDPR COMPLIANCE ===
+app.get('/api/user/data-export', authenticateToken, async (c) => {
+  try {
+    const user = c.get('user');
+    const supabase = c.get('supabase');
+    
+    // Export all user data
+    const [userData, chatbotsData, documentsData] = await Promise.all([
+      supabase.from('users').select('*').eq('id', user.userId).single(),
+      supabase.from('chatbots').select('*').eq('user_id', user.userId),
+      supabase.from('documents').select('*').eq('user_id', user.userId)
+    ]);
+    
+    const exportData = {
+      user: userData.data,
+      chatbots: chatbotsData.data || [],
+      documents: (documentsData.data || []).map(doc => ({
+        ...doc,
+        content: doc.content ? '[CONTENT_REDACTED_FOR_EXPORT]' : null
+      })),
+      exportDate: new Date().toISOString()
+    };
+    
+    logActivity(c, 'DATA_EXPORT', { userId: user.userId });
+    return c.json(exportData);
+  } catch (error) {
+    logError(c, error, 'DATA_EXPORT');
+    return c.json({ error: 'Failed to export data' }, 500);
+  }
+});
+
+app.delete('/api/user/account', authenticateToken, async (c) => {
+  try {
+    const user = c.get('user');
+    const supabase = c.get('supabase');
+    
+    // Delete all user data (GDPR Right to be Forgotten)
+    await Promise.all([
+      supabase.from('documents').delete().eq('user_id', user.userId),
+      supabase.from('chatbots').delete().eq('user_id', user.userId),
+      supabase.from('users').delete().eq('id', user.userId)
+    ]);
+    
+    logActivity(c, 'ACCOUNT_DELETED', { userId: user.userId });
+    return c.json({ message: 'Account and all data deleted successfully' });
+  } catch (error) {
+    logError(c, error, 'ACCOUNT_DELETION');
+    return c.json({ error: 'Failed to delete account' }, 500);
+  }
+});
+
+app.put('/api/user/privacy-settings', authenticateToken, async (c) => {
+  try {
+    const user = c.get('user');
+    const { dataProcessingConsent, marketingConsent } = await c.req.json();
+    const supabase = c.get('supabase');
+    
+    const { error } = await supabase
+      .from('users')
+      .update({
+        data_processing_consent: dataProcessingConsent,
+        marketing_consent: marketingConsent,
+        consent_updated_at: new Date().toISOString()
+      })
+      .eq('id', user.userId);
+    
+    if (error) throw error;
+    logActivity(c, 'PRIVACY_SETTINGS_UPDATED', { userId: user.userId });
+    return c.json({ message: 'Privacy settings updated' });
+  } catch (error) {
+    logError(c, error, 'PRIVACY_SETTINGS');
+    return c.json({ error: 'Failed to update privacy settings' }, 500);
   }
 });
 
@@ -232,7 +485,8 @@ app.get('/api/chatbots', authenticateToken, async (c) => {
 app.post('/api/chatbots', authenticateToken, async (c) => {
   try {
     const user = c.get('user');
-    const { name, color, welcomeMessage } = await c.req.json();
+    const rawData = await c.req.json();
+    const sanitized = validateChatbotData(rawData);
     const id = 'cb_' + Math.random().toString(36).substr(2, 9);
 
     const supabase = c.get('supabase');
@@ -241,9 +495,9 @@ app.post('/api/chatbots', authenticateToken, async (c) => {
       .insert([{
         id,
         user_id: user.userId,
-        name: name || 'My Chatbot',
-        color: color || '#667eea',
-        welcome_message: welcomeMessage || 'Hi!'
+        name: sanitized.name || 'My Chatbot',
+        color: sanitized.color,
+        welcome_message: sanitized.welcomeMessage || 'Hi!'
       }])
       .select()
       .single();
@@ -251,7 +505,8 @@ app.post('/api/chatbots', authenticateToken, async (c) => {
     if (error) throw error;
     return c.json(data);
   } catch (error) {
-    return c.json({ error: error.message }, 500);
+    logError(c, error, 'CHATBOT_CREATE');
+    return c.json({ error: 'Failed to create chatbot' }, 500);
   }
 });
 
@@ -370,11 +625,18 @@ app.delete('/api/chatbots/:id/documents/:docId', authenticateToken, async (c) =>
 });
 
 // === CHAT ENDPOINT ===
-app.post('/api/chat', async (c) => {
+app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
   try {
     const { chatbotId, message } = await c.req.json();
     if (!chatbotId || !message) {
       return c.json({ error: 'Missing required parameters' }, 400);
+    }
+
+    // Sanitize and validate chat input
+    const sanitizedMessage = sanitizeInput(message);
+    if (sanitizedMessage.length > 500) {
+      logSecurityEvent(c, 'LONG_MESSAGE_BLOCKED', { length: message.length });
+      return c.json({ error: 'Message too long' }, 400);
     }
 
     const supabase = c.get('supabase');
@@ -414,38 +676,55 @@ app.post('/api/chat', async (c) => {
     const data = await response.json();
     return c.json({ response: data.choices[0].message.content });
   } catch (error) {
+    logError(c, error, 'CHAT_PROCESSING');
     return c.json({ error: 'Failed to process chat message' }, 500);
   }
 });
 
-// Public chatbot config (no auth)
-app.get('/public/chatbots/:id', cors({ origin: '*' }), async (c) => {
+// Public chatbot config (no auth) - with caching
+app.get('/public/chatbots/:id', cors({ origin: '*' }), rateLimitMiddleware(1000, 3600), async (c) => {
   try {
     const chatbotId = c.req.param('id');
-    const supabase = c.get('supabase');
+    const cacheKey = `chatbot:${chatbotId}`;
+    
+    // Try cache first
+    let data = await getFromCache(c, cacheKey);
+    
+    if (!data) {
+      const supabase = c.get('supabase');
+      const { data: dbData, error } = await supabase
+        .from('chatbots')
+        .select('name,color,welcome_message,is_deployed')
+        .eq('id', chatbotId)
+        .single();
 
-    const { data, error } = await supabase
-      .from('chatbots')
-      .select('name,color,welcome_message,is_deployed')
-      .eq('id', chatbotId)
-      .single();
+      if (error || !dbData || !dbData.is_deployed) {
+        return c.json({ error: 'Not found' }, 404);
+      }
 
-    if (error || !data || !data.is_deployed) {
-      return c.json({ error: 'Not found' }, 404);
+      data = {
+        name: dbData.name,
+        color: dbData.color,
+        welcomeMessage: dbData.welcome_message
+      };
+      
+      // Cache for 5 minutes
+      await setCache(c, cacheKey, data, 300);
     }
 
-    return c.json({
-      name: data.name,
-      color: data.color,
-      welcomeMessage: data.welcome_message
-    });
+    return c.json(data);
   } catch (err) {
+    await logError(c, err, 'CHATBOT_CONFIG');
     return c.json({ error: 'Failed to load config' }, 500);
   }
 });
 
-// Serve widget.js
-app.get('/widget.js', async (c) => {
+// Serve widget.js with CDN caching
+app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
+  // Set CDN cache headers
+  c.header('Cache-Control', 'public, max-age=3600, s-maxage=86400'); // 1 hour browser, 24 hour CDN
+  c.header('Content-Type', 'application/javascript');
+  c.header('ETag', `"widget-v${Date.now()}"`);
   const widgetCode = `(async function() {
     if (!window.chatbotConfig) {
         console.error('Chatbot configuration not found!');
@@ -747,9 +1026,7 @@ app.get('/widget.js', async (c) => {
     closeBtn.onclick = hideChat;
 })();`;
   
-  return c.text(widgetCode, 200, {
-    'Content-Type': 'application/javascript',
-  });
+  return c.text(widgetCode, 200);
 });
 
 export default app;
