@@ -102,3 +102,72 @@ GROUP BY u.id;
 -- 11. Add cleanup job for old logs (optional)
 -- DELETE FROM error_logs WHERE created_at < NOW() - INTERVAL '30 days';
 -- DELETE FROM activity_logs WHERE created_at < NOW() - INTERVAL '90 days';
+
+-- Connect to your database and run:
+
+-- Update existing users table to match backend expectations
+ALTER TABLE users ADD COLUMN IF NOT EXISTS first_name VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_name VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS company_name VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP;
+
+-- If users table doesn't exist, create it with all required fields
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  first_name VARCHAR(255),
+  last_name VARCHAR(255),
+  company_name VARCHAR(255),
+  stripe_customer_id VARCHAR(255),
+  plan VARCHAR(50) DEFAULT 'free',
+  trial_ends_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE chatbots (
+  id VARCHAR(50) PRIMARY KEY,
+  user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+  name VARCHAR(255) NOT NULL,
+  color VARCHAR(7) DEFAULT '#6366f1',
+  welcome_message TEXT DEFAULT 'Hi! How can I help you today?',
+  is_deployed BOOLEAN DEFAULT false,
+  api_calls_count INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE documents (
+  id SERIAL PRIMARY KEY,
+  chatbot_id VARCHAR(50) REFERENCES chatbots(id) ON DELETE CASCADE,
+  filename VARCHAR(255) NOT NULL,
+  content TEXT,
+  file_type VARCHAR(50),
+  file_size INTEGER,
+  status VARCHAR(50) DEFAULT 'processing',
+  s3_url TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE connections (
+  id SERIAL PRIMARY KEY,
+  chatbot_id VARCHAR(50) REFERENCES chatbots(id) ON DELETE CASCADE,
+  connection_type VARCHAR(50) NOT NULL,
+  credentials TEXT,
+  status VARCHAR(50) DEFAULT 'connected',
+  last_sync TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE conversations (
+  id SERIAL PRIMARY KEY,
+  chatbot_id VARCHAR(50) REFERENCES chatbots(id),
+  session_id VARCHAR(255),
+  message TEXT,
+  response TEXT,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_chatbots_user_id ON chatbots(user_id);
+CREATE INDEX idx_documents_chatbot_id ON documents(chatbot_id);
+CREATE INDEX idx_conversations_chatbot_id ON conversations(chatbot_id);

@@ -134,31 +134,32 @@ async function logActivity(c, action, details = {}) {
 
 const app = new Hono();
 
-// CORS configuration
-const allowedOrigins = [
-  'http://localhost:3000',
-  'https://chatbot.prosperonline.ca'
-];
-
-// CORS for authenticated routes
-app.use('/api/auth/*', cors({
-  origin: allowedOrigins,
-  credentials: true,
-}));
-
-app.use('/api/chatbots/*', cors({
-  origin: allowedOrigins,
-  credentials: true,
-}));
-
-app.use('/api/user/*', cors({
-  origin: allowedOrigins,
-  credentials: true,
-}));
-
-// CORS for public routes (widget)
-app.use('/api/chat', cors({ origin: '*' }));
-app.use('/widget.js', cors({ origin: '*' }));
+// Manual CORS handler
+app.use('*', async (c, next) => {
+  const origin = c.req.header('origin');
+  const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:3009',
+    'http://localhost:60153',
+    'https://chatbot.prosperonline.ca'
+  ];
+  
+  if (c.req.method === 'OPTIONS') {
+    c.header('Access-Control-Allow-Origin', allowedOrigins.includes(origin) ? origin : '*');
+    c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    c.header('Access-Control-Allow-Credentials', 'true');
+    return c.text('', 200);
+  }
+  
+  if (allowedOrigins.includes(origin) || c.req.url.includes('/api/chat') || c.req.url.includes('/widget.js')) {
+    c.header('Access-Control-Allow-Origin', allowedOrigins.includes(origin) ? origin : '*');
+    c.header('Access-Control-Allow-Credentials', 'true');
+  }
+  
+  await next();
+});
 
 // Cache utilities
 async function getFromCache(c, key) {
@@ -250,10 +251,13 @@ app.get('/', (c) => c.json({ message: 'Chatbot API (Cloudflare)', version: '3.4.
 // === AUTH ROUTES ===
 app.post('/api/auth/register', async (c) => {
   try {
+    console.log('[REGISTER] Starting registration');
     const { firstName, lastName, companyName, email, password } = await c.req.json();
+    console.log('[REGISTER] Data:', { firstName, lastName, email });
     
     // Validate required fields
     if (!firstName?.trim() || !lastName?.trim() || !email || !password) {
+      console.log('[REGISTER] Missing required fields');
       return c.json({ error: 'First name, last name, email and password required' }, 400);
     }
     
@@ -274,21 +278,30 @@ app.post('/api/auth/register', async (c) => {
       }
     }
 
+    console.log('[REGISTER] Getting supabase client');
     const supabase = c.get('supabase');
     
-    const { data: existing } = await supabase
+    console.log('[REGISTER] Checking existing user');
+    const { data: existing, error: existingError } = await supabase
       .from('users')
       .select('id')
       .eq('email', email.toLowerCase());
+      
+    if (existingError) {
+      console.error('[REGISTER] Error checking existing user:', existingError);
+      return c.json({ error: 'Database error' }, 500);
+    }
       
     if (existing?.length > 0) {
       return c.json({ error: 'Email already registered' }, 400);
     }
 
+    console.log('[REGISTER] Hashing password');
     const hash = await bcrypt.hash(password, 10);
     const trialEndsAt = new Date();
     trialEndsAt.setDate(trialEndsAt.getDate() + 14); // 14-day trial
     
+    console.log('[REGISTER] Inserting user');
     const { data, error } = await supabase
       .from('users')
       .insert([{ 
@@ -302,13 +315,18 @@ app.post('/api/auth/register', async (c) => {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      console.error('[REGISTER] Insert error:', error);
+      throw error;
+    }
 
+    console.log('[REGISTER] Creating token');
     const token = await jwt.sign(
       { userId: data.id, email: data.email },
       String(c.env.JWT_SECRET)
     );
 
+    console.log('[REGISTER] Success');
     return c.json({ 
       token, 
       user: { 
@@ -320,6 +338,7 @@ app.post('/api/auth/register', async (c) => {
       } 
     });
   } catch (error) {
+    console.error('[REGISTER] Error:', error);
     return c.json({ error: error.message }, 500);
   }
 });
@@ -334,11 +353,16 @@ app.post('/api/auth/login', async (c) => {
     const supabase = c.get('supabase');
     const { data: users, error } = await supabase
       .from('users')
-      .select('*')
+      .select('id,email,password_hash,first_name,last_name,trial_ends_at')
       .eq('email', email.toLowerCase())
       .single();
       
-    if (error || !users) {
+    if (error) {
+      console.error('Login query error:', error);
+      return c.json({ error: 'Invalid credentials' }, 401);
+    }
+    
+    if (!users) {
       return c.json({ error: 'Invalid credentials' }, 401);
     }
 
@@ -357,12 +381,13 @@ app.post('/api/auth/login', async (c) => {
       user: { 
         id: users.id, 
         email: users.email,
-        first_name: users.first_name,
-        last_name: users.last_name,
-        trial_ends_at: users.trial_ends_at
+        first_name: users.first_name || null,
+        last_name: users.last_name || null,
+        trial_ends_at: users.trial_ends_at || null
       } 
     });
   } catch (error) {
+    console.error('Login error:', error);
     return c.json({ error: error.message }, 500);
   }
 });
@@ -375,7 +400,7 @@ app.get('/api/user/profile', authenticateToken, async (c) => {
     
     const { data, error } = await supabase
       .from('users')
-      .select('id,email,first_name,last_name,trial_ends_at,data_processing_consent,marketing_consent')
+      .select('id,email,first_name,last_name,trial_ends_at')
       .eq('id', user.userId)
       .single();
       
@@ -526,9 +551,136 @@ app.put('/api/chatbots/:id', authenticateToken, async (c) => {
       .single();
 
     if (error) throw error;
+    
+    // Clear cache so widget gets updated config immediately
+    const cacheKey = `chatbot:${chatbotId}`;
+    await c.env.CHATBOT_CACHE?.delete(cacheKey);
+    
     return c.json(data);
   } catch (error) {
     return c.json({ error: error.message }, 500);
+  }
+});
+
+// === ANALYTICS ===
+app.get('/api/chatbots/:id/analytics', authenticateToken, async (c) => {
+  try {
+    const chatbotId = c.req.param('id');
+    const days = parseInt(c.req.query('days')) || 30;
+    const supabase = c.get('supabase');
+    
+    // Get analytics data for the last N days
+    const { data: analytics, error } = await supabase
+      .from('chat_analytics')
+      .select('*')
+      .eq('chatbot_id', chatbotId)
+      .gte('date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+      .order('date', { ascending: true });
+    
+    if (error) throw error;
+    
+    // Get real-time stats for today
+    const today = new Date().toISOString().split('T')[0];
+    const { data: todayStats } = await supabase
+      .from('chat_sessions')
+      .select(`
+        id,
+        started_at,
+        ended_at,
+        message_count,
+        satisfaction_rating,
+        chat_messages(response_time_ms)
+      `)
+      .eq('chatbot_id', chatbotId)
+      .gte('started_at', today)
+      .lt('started_at', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+    
+    const realTimeStats = {
+      todaySessions: todayStats?.length || 0,
+      todayMessages: todayStats?.reduce((sum, session) => sum + (session.message_count || 0), 0) || 0,
+      avgResponseTime: todayStats?.reduce((sum, session) => {
+        const avgTime = session.chat_messages?.reduce((s, msg) => s + (msg.response_time_ms || 0), 0) / (session.chat_messages?.length || 1);
+        return sum + avgTime;
+      }, 0) / (todayStats?.length || 1) || 0,
+      avgSatisfaction: todayStats?.filter(s => s.satisfaction_rating).reduce((sum, s) => sum + s.satisfaction_rating, 0) / todayStats?.filter(s => s.satisfaction_rating).length || 0
+    };
+    
+    return c.json({ analytics, realTimeStats });
+  } catch (error) {
+    logError(c, error, 'ANALYTICS_FETCH');
+    return c.json({ error: 'Failed to fetch analytics' }, 500);
+  }
+});
+
+app.get('/api/chatbots/:id/conversations', authenticateToken, async (c) => {
+  try {
+    const chatbotId = c.req.param('id');
+    const page = parseInt(c.req.query('page')) || 1;
+    const limit = parseInt(c.req.query('limit')) || 20;
+    const offset = (page - 1) * limit;
+    const supabase = c.get('supabase');
+    
+    // Get conversations grouped by session
+    const { data: conversations, error } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('chatbot_id', chatbotId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    // Group conversations by session_id
+    const sessionMap = new Map();
+    conversations?.forEach(conv => {
+      const sessionId = conv.session_id || 'unknown';
+      if (!sessionMap.has(sessionId)) {
+        sessionMap.set(sessionId, {
+          session_id: sessionId,
+          started_at: conv.created_at,
+          messages: []
+        });
+      }
+      sessionMap.get(sessionId).messages.push({
+        id: conv.id,
+        message: conv.message,
+        response: conv.response,
+        is_user_message: conv.is_user_message,
+        response_time_ms: conv.response_time_ms,
+        created_at: conv.created_at
+      });
+    });
+    
+    const sessions = Array.from(sessionMap.values());
+    
+    if (error) throw error;
+    
+    return c.json({ conversations: sessions, page, limit });
+  } catch (error) {
+    logError(c, error, 'CONVERSATIONS_FETCH');
+    return c.json({ error: 'Failed to fetch conversations' }, 500);
+  }
+});
+
+app.post('/api/chat/feedback', async (c) => {
+  try {
+    const { sessionId, rating } = await c.req.json();
+    if (!sessionId || !rating || rating < 1 || rating > 5) {
+      return c.json({ error: 'Invalid session ID or rating' }, 400);
+    }
+    
+    const supabase = c.get('supabase');
+    const { error } = await supabase
+      .from('chat_sessions')
+      .update({ 
+        satisfaction_rating: rating,
+        ended_at: new Date().toISOString()
+      })
+      .eq('session_id', sessionId);
+    
+    if (error) throw error;
+    return c.json({ success: true });
+  } catch (error) {
+    logError(c, error, 'FEEDBACK_SUBMIT');
+    return c.json({ error: 'Failed to submit feedback' }, 500);
   }
 });
 
@@ -626,8 +778,9 @@ app.delete('/api/chatbots/:id/documents/:docId', authenticateToken, async (c) =>
 
 // === CHAT ENDPOINT ===
 app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
+  const startTime = Date.now();
   try {
-    const { chatbotId, message } = await c.req.json();
+    const { chatbotId, message, sessionId } = await c.req.json();
     if (!chatbotId || !message) {
       return c.json({ error: 'Missing required parameters' }, 400);
     }
@@ -640,13 +793,49 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
     }
 
     const supabase = c.get('supabase');
+    const ip = c.req.header('cf-connecting-ip');
+    const userAgent = c.req.header('user-agent');
+    const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Create or update chat session
+    await supabase.from('chat_sessions').upsert({
+      chatbot_id: chatbotId,
+      session_id: currentSessionId,
+      ip_address: ip,
+      user_agent: userAgent,
+      started_at: new Date().toISOString()
+    }, { onConflict: 'session_id' });
+
+    // Log user message in conversations table
+    await supabase.from('conversations').insert({
+      chatbot_id: chatbotId,
+      session_id: currentSessionId,
+      message: sanitizedMessage,
+      response: null,
+      is_user_message: true,
+      ip_address: ip,
+      user_agent: userAgent
+    });
+
     const { data: documents } = await supabase
       .from('documents')
       .select('content')
       .eq('chatbot_id', chatbotId);
 
     if (!documents || documents.length === 0) {
-      return c.json({ response: "I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance." });
+      const botResponse = "I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance.";
+      
+      // Log bot response in conversations table
+      await supabase.from('conversations').insert({
+        chatbot_id: chatbotId,
+        session_id: currentSessionId,
+        message: null,
+        response: botResponse,
+        is_user_message: false,
+        response_time_ms: Date.now() - startTime
+      });
+      
+      return c.json({ response: botResponse, sessionId: currentSessionId });
     }
 
     const context = documents.map(doc => doc.content).join('\\n\\n');
@@ -674,7 +863,23 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
     });
 
     const data = await response.json();
-    return c.json({ response: data.choices[0].message.content });
+    const botResponse = data.choices[0].message.content;
+    const responseTime = Date.now() - startTime;
+
+    // Log bot response in conversations table
+    await supabase.from('conversations').insert({
+      chatbot_id: chatbotId,
+      session_id: currentSessionId,
+      message: null,
+      response: botResponse,
+      is_user_message: false,
+      response_time_ms: responseTime
+    });
+
+    // Update session message count
+    await supabase.rpc('increment_session_messages', { session_id_param: currentSessionId });
+
+    return c.json({ response: botResponse, sessionId: currentSessionId });
   } catch (error) {
     logError(c, error, 'CHAT_PROCESSING');
     return c.json({ error: 'Failed to process chat message' }, 500);
@@ -708,8 +913,8 @@ app.get('/public/chatbots/:id', cors({ origin: '*' }), rateLimitMiddleware(1000,
         welcomeMessage: dbData.welcome_message
       };
       
-      // Cache for 5 minutes
-      await setCache(c, cacheKey, data, 300);
+      // Cache for 30 seconds (short TTL for faster updates)
+      await setCache(c, cacheKey, data, 30);
     }
 
     return c.json(data);
