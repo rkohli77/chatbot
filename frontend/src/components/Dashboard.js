@@ -105,15 +105,25 @@ function Dashboard({ setAuth }) {
     }
   };
 
-  const handleDeleteFile = async (docId) => {
-    if (!window.confirm('Are you sure you want to delete this document? This action cannot be undone.')) return;
-    
+  const [deleteModal, setDeleteModal] = useState({ show: false, docId: null, filename: '' });
+
+  const handleDeleteFile = async (docId, filename) => {
+    setDeleteModal({ show: true, docId, filename });
+  };
+
+  const confirmDelete = async () => {
     try {
-      await documents.delete(selectedChatbot.id, docId);
-      setFiles(files.filter(f => f.id !== docId));
+      await documents.delete(selectedChatbot.id, deleteModal.docId);
+      setFiles(files.filter(f => f.id !== deleteModal.docId));
+      setDeleteModal({ show: false, docId: null, filename: '' });
+      showNotification('Document deleted successfully!');
     } catch (error) {
       showNotification('Failed to delete document: ' + (error.response?.data?.error || 'Unknown error'), 'error');
     }
+  };
+
+  const cancelDelete = () => {
+    setDeleteModal({ show: false, docId: null, filename: '' });
   };
 
   const handleUpdateChatbot = async () => {
@@ -680,7 +690,7 @@ function Dashboard({ setAuth }) {
                           </p>
                         </div>
                         <button
-                          onClick={() => handleDeleteFile(file.id)}
+                          onClick={() => handleDeleteFile(file.id, file.filename)}
                           style={{
                             background: '#fee2e2',
                             color: '#dc2626',
@@ -914,6 +924,108 @@ function Dashboard({ setAuth }) {
           )}
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deleteModal.show && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '32px',
+            maxWidth: '500px',
+            width: '90%',
+            boxShadow: '0 25px 50px rgba(0, 0, 0, 0.25)'
+          }}>
+            <div style={{
+              textAlign: 'center',
+              marginBottom: '24px'
+            }}>
+              <div style={{
+                width: '64px',
+                height: '64px',
+                borderRadius: '50%',
+                background: '#fee2e2',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 16px auto',
+                fontSize: '24px',
+                color: '#dc2626'
+              }}>
+                ⚠️
+              </div>
+              <h3 style={{
+                fontSize: '20px',
+                fontWeight: '600',
+                color: '#1f2937',
+                margin: '0 0 8px 0'
+              }}>
+                Delete Document
+              </h3>
+              <p style={{
+                color: '#6b7280',
+                margin: 0,
+                lineHeight: '1.5'
+              }}>
+                Are you sure you want to delete <strong>"{deleteModal.filename}"</strong>? This action cannot be undone and will permanently remove this document from your chatbot's training data.
+              </p>
+            </div>
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'center'
+            }}>
+              <button
+                onClick={cancelDelete}
+                style={{
+                  background: '#f3f4f6',
+                  color: '#374151',
+                  padding: '12px 24px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#e5e7eb'}
+                onMouseLeave={(e) => e.target.style.background = '#f3f4f6'}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                style={{
+                  background: '#dc2626',
+                  color: 'white',
+                  padding: '12px 24px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+                onMouseEnter={(e) => e.target.style.background = '#b91c1c'}
+                onMouseLeave={(e) => e.target.style.background = '#dc2626'}
+              >
+                Delete Document
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

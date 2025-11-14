@@ -305,8 +305,29 @@ app.post('/api/chatbots/:id/documents', authenticateToken, async (c) => {
       return c.json({ error: 'No file uploaded' }, 400);
     }
 
-    const buffer = await file.arrayBuffer();
-    const content = new TextDecoder().decode(buffer);
+    // File size validation (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      return c.json({ error: 'File size exceeds 10MB limit' }, 400);
+    }
+
+    let content;
+    try {
+      const buffer = await file.arrayBuffer();
+      content = new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+      
+      // Check if content is readable (not just binary data)
+      if (!content.trim() || content.length < 10) {
+        return c.json({ error: 'File appears to be empty or unreadable. Please upload a text-based document.' }, 400);
+      }
+      
+      // Check for binary content indicators
+      if (content.includes('\0') || /[\x00-\x08\x0E-\x1F\x7F-\xFF]{10,}/.test(content)) {
+        return c.json({ error: 'File appears to be binary or corrupted. Please upload a text document (TXT, CSV) or try a different file.' }, 400);
+      }
+      
+    } catch (decodeError) {
+      return c.json({ error: 'File encoding is not supported or file is corrupted. Please upload a UTF-8 text file.' }, 400);
+    }
 
     const supabase = c.get('supabase');
     const { data, error } = await supabase
