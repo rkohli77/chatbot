@@ -603,45 +603,52 @@ app.get('/api/chatbots/:id/analytics', authenticateToken, async (c) => {
 app.get('/api/chatbots/:id/conversations', authenticateToken, async (c) => {
   try {
     const chatbotId = c.req.param('id');
-    const page = parseInt(c.req.query('page')) || 1;
-    const limit = parseInt(c.req.query('limit')) || 20;
-    const offset = (page - 1) * limit;
     const supabase = c.get('supabase');
     
-    // Get conversations grouped by session
-    const { data: conversations, error } = await supabase
+    // Get all unique sessions
+    const { data: sessions, error: sessionsError } = await supabase
+      .from('chat_sessions')
+      .select('session_id, started_at')
+      .eq('chatbot_id', chatbotId)
+      .order('started_at', { ascending: false });
+    
+    if (sessionsError) throw sessionsError;
+    
+    // Get all conversations for these sessions
+    const { data: conversations, error: convsError } = await supabase
       .from('conversations')
       .select('*')
       .eq('chatbot_id', chatbotId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+      .order('created_at', { ascending: true });
     
-    // Group conversations by session_id
+    if (convsError) throw convsError;
+    
+    // Group conversations by session
     const sessionMap = new Map();
-    conversations?.forEach(conv => {
-      const sessionId = conv.session_id || 'unknown';
-      if (!sessionMap.has(sessionId)) {
-        sessionMap.set(sessionId, {
-          session_id: sessionId,
-          started_at: conv.created_at,
-          messages: []
-        });
-      }
-      sessionMap.get(sessionId).messages.push({
-        id: conv.id,
-        message: conv.message,
-        response: conv.response,
-        is_user_message: conv.is_user_message,
-        response_time_ms: conv.response_time_ms,
-        created_at: conv.created_at
+    sessions?.forEach(session => {
+      sessionMap.set(session.session_id, {
+        session_id: session.session_id,
+        started_at: session.started_at,
+        messages: []
       });
     });
     
-    const sessions = Array.from(sessionMap.values());
+    conversations?.forEach(conv => {
+      if (sessionMap.has(conv.session_id)) {
+        sessionMap.get(conv.session_id).messages.push({
+          id: conv.id,
+          message: conv.message,
+          response: conv.response,
+          is_user_message: conv.is_user_message,
+          response_time_ms: conv.response_time_ms,
+          created_at: conv.created_at
+        });
+      }
+    });
     
-    if (error) throw error;
+    const result = Array.from(sessionMap.values());
     
-    return c.json({ conversations: sessions, page, limit });
+    return c.json({ conversations: result });
   } catch (error) {
     logError(c, error, 'CONVERSATIONS_FETCH');
     return c.json({ error: 'Failed to fetch conversations' }, 500);
@@ -651,17 +658,21 @@ app.get('/api/chatbots/:id/conversations', authenticateToken, async (c) => {
 app.post('/api/chat/feedback', async (c) => {
   try {
     const { sessionId, rating } = await c.req.json();
-    if (!sessionId || !rating || rating < 1 || rating > 5) {
+    if (!sessionId || rating < 0 || rating > 5) {
       return c.json({ error: 'Invalid session ID or rating' }, 400);
     }
     
     const supabase = c.get('supabase');
+    const updateData = { ended_at: new Date().toISOString() };
+    
+    // Only set rating if it's between 1-5 (0 means session ended without rating)
+    if (rating >= 1 && rating <= 5) {
+      updateData.satisfaction_rating = rating;
+    }
+    
     const { error } = await supabase
       .from('chat_sessions')
-      .update({ 
-        satisfaction_rating: rating,
-        ended_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('session_id', sessionId);
     
     if (error) throw error;
@@ -765,7 +776,7 @@ app.delete('/api/chatbots/:id/documents/:docId', authenticateToken, async (c) =>
 });
 
 // === CHAT ENDPOINT ===
-app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
+app.post('/api/chat', rateLimitMiddleware(500, 3600), async (c) => {
   const startTime = Date.now();
   try {
     const { chatbotId, message, sessionId } = await c.req.json();
@@ -1066,6 +1077,93 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
         background: #f9fafb;
     \`;
 
+    const ratingContainer = document.createElement('div');
+    ratingContainer.style.cssText = \`
+        padding: 12px 15px;
+        border-top: 1px solid #e5e7eb;
+        background: #f9fafb;
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+    \`;
+    
+    const ratingText = document.createElement('div');
+    ratingText.textContent = 'Rate this conversation:';
+    ratingText.style.cssText = \`
+        font-size: 13px;
+        color: #6b7280;
+        font-family: system-ui, -apple-system, sans-serif;
+    \`;
+    
+    const starsContainer = document.createElement('div');
+    starsContainer.style.cssText = \`
+        display: flex;
+        gap: 8px;
+        justify-content: center;
+    \`;
+    
+    let selectedRating = 0;
+    for (let i = 1; i <= 5; i++) {
+        const star = document.createElement('button');
+        star.innerHTML = '★';
+        star.dataset.rating = i;
+        star.style.cssText = \`
+            background: none;
+            border: none;
+            font-size: 24px;
+            color: #d1d5db;
+            cursor: pointer;
+            padding: 0;
+            transition: color 0.2s;
+        \`;
+        star.onmouseover = () => {
+            for (let j = 1; j <= 5; j++) {
+                const s = starsContainer.querySelector(\`[data-rating="\${j}"]\`);
+                s.style.color = j <= i ? '#fbbf24' : '#d1d5db';
+            }
+        };
+        star.onmouseout = () => {
+            for (let j = 1; j <= 5; j++) {
+                const s = starsContainer.querySelector(\`[data-rating="\${j}"]\`);
+                s.style.color = j <= selectedRating ? '#fbbf24' : '#d1d5db';
+            }
+        };
+        star.onclick = async () => {
+            selectedRating = i;
+            for (let j = 1; j <= 5; j++) {
+                const s = starsContainer.querySelector(\`[data-rating="\${j}"]\`);
+                s.style.color = j <= i ? '#fbbf24' : '#d1d5db';
+            }
+            
+            try {
+                await fetch(\`\${config.apiUrl}/api/chat/feedback\`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sessionId: currentSessionId, rating: i })
+                });
+                ratingText.textContent = 'Thanks for your feedback!';
+                ratingText.style.color = '#10b981';
+                setTimeout(() => {
+                    chatWindow.style.display = 'none';
+                    // Reset for next time
+                    messagesContainer.style.display = 'flex';
+                    inputContainer.style.display = 'flex';
+                    ratingContainer.style.display = 'none';
+                    messagesContainer.innerHTML = '';
+                    currentSessionId = null;
+                    localStorage.removeItem(sessionKey);
+                    localStorage.removeItem(sessionTimeKey);
+                }, 2000);
+            } catch (error) {
+                console.error('Failed to submit rating:', error);
+            }
+        };
+        starsContainer.appendChild(star);
+    }
+    
+    ratingContainer.appendChild(ratingText);
+    ratingContainer.appendChild(starsContainer);
+
     const inputContainer = document.createElement('div');
     inputContainer.style.cssText = \`
         padding: 15px;
@@ -1120,6 +1218,7 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
     inputContainer.appendChild(sendButton);
     chatWindow.appendChild(chatHeader);
     chatWindow.appendChild(messagesContainer);
+    chatWindow.appendChild(ratingContainer);
     chatWindow.appendChild(inputContainer);
     chatbotContainer.appendChild(chatWindow);
     chatbotContainer.appendChild(toggleButton);
@@ -1257,6 +1356,22 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
     }, 60000); // Check every minute
     
     function showChat() {
+        // Reset UI if it was closed (rating was shown)
+        if (ratingContainer.style.display === 'flex') {
+            messagesContainer.style.display = 'flex';
+            inputContainer.style.display = 'flex';
+            ratingContainer.style.display = 'none';
+            messagesContainer.innerHTML = '';
+            welcomeShown = false;
+            sessionExpired = false;
+            expirationShown = false;
+        }
+        
+        // Reset welcome flag if no active session (new session starting)
+        if (!currentSessionId) {
+            welcomeShown = false;
+        }
+        
         chatWindow.style.display = 'flex';
         input.focus();
         if (!welcomeShown) {
@@ -1277,6 +1392,27 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
         chatWindow.style.display = 'none';
     }
     
+    function closeChat() {
+        if (currentSessionId && messagesContainer.children.length > 1) {
+            // Hide messages and input, show rating
+            messagesContainer.style.display = 'none';
+            inputContainer.style.display = 'none';
+            ratingContainer.style.display = 'flex';
+            
+            // End session
+            fetch(\`\${config.apiUrl}/api/chat/feedback\`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    sessionId: currentSessionId, 
+                    rating: 0
+                })
+            }).catch(err => console.error('Failed to end session:', err));
+        } else {
+            chatWindow.style.display = 'none';
+        }
+    }
+    
     toggleButton.onclick = () => {
         const isVisible = chatWindow.style.display === 'flex';
         if (isVisible) {
@@ -1287,7 +1423,7 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
     };
     
     minimizeBtn.onclick = hideChat;
-    closeBtn.onclick = hideChat;
+    closeBtn.onclick = closeChat;
 })();`;
   
   return c.text(widgetCode, 200);
