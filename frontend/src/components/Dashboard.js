@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { user, chatbots, documents } from '../services/api';
+import Analytics from './Analytics';
+import Conversations from './Conversations';
 
 function Dashboard({ setAuth }) {
   const navigate = useNavigate();
@@ -349,7 +351,7 @@ function Dashboard({ setAuth }) {
             borderBottom: '2px solid #e5e7eb',
             marginTop: '24px'
           }}>
-            {['chatbots', 'upload', 'customize', 'deploy'].map(tab => (
+            {['chatbots', 'upload', 'customize', 'analytics', 'conversations', 'deploy'].map(tab => (
               <button
                 key={tab}
                 onClick={() => handleTabChange(tab)}
@@ -366,7 +368,7 @@ function Dashboard({ setAuth }) {
                   transition: 'all 0.2s'
                 }}
               >
-                {tab === 'upload' ? 'Documents' : tab}
+                {tab === 'upload' ? 'Documents' : tab === 'analytics' ? 'Analytics' : tab === 'conversations' ? 'Chat History' : tab}
               </button>
             ))}
           </div>
@@ -832,6 +834,16 @@ function Dashboard({ setAuth }) {
                 </button>
               </div>
             </div>
+          )}
+
+          {/* Analytics Tab */}
+          {activeTab === 'analytics' && selectedChatbot && (
+            <Analytics chatbotId={selectedChatbot.id} />
+          )}
+
+          {/* Conversations Tab */}
+          {activeTab === 'conversations' && selectedChatbot && (
+            <Conversations chatbotId={selectedChatbot.id} />
           )}
 
           {/* Deploy Tab */}

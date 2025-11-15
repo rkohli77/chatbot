@@ -51,4 +51,19 @@ export const connections = {
   getAll: (chatbotId) => api.get(`/api/chatbots/${chatbotId}/connections`)
 };
 
-export default api;
+export const analytics = {
+  get: async (chatbotId, days = 7) => {
+    const response = await api.get(`/api/chatbots/${chatbotId}/analytics?days=${days}`);
+    return response.data;
+  },
+  getConversations: async (chatbotId, page = 1, limit = 20) => {
+    const response = await api.get(`/api/chatbots/${chatbotId}/conversations?page=${page}&limit=${limit}`);
+    return response.data;
+  }
+};
+
+export default {
+  ...api,
+  getAnalytics: analytics.get,
+  getConversations: analytics.getConversations
+};

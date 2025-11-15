@@ -113,7 +113,7 @@ async function logActivity(c, action, details = {}) {
     ...details
   };
   
-  console.log(`[ACTIVITY] ${action}:`, activityLog);
+
   
   // Log important activities to database for audit trail
   if (['ACCOUNT_DELETED', 'DATA_EXPORT', 'PRIVACY_SETTINGS_UPDATED'].includes(action)) {
@@ -140,8 +140,6 @@ app.use('*', async (c, next) => {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
-    'http://localhost:3009',
-    'http://localhost:60153',
     'https://chatbot.prosperonline.ca'
   ];
   
@@ -251,13 +249,11 @@ app.get('/', (c) => c.json({ message: 'Chatbot API (Cloudflare)', version: '3.4.
 // === AUTH ROUTES ===
 app.post('/api/auth/register', async (c) => {
   try {
-    console.log('[REGISTER] Starting registration');
     const { firstName, lastName, companyName, email, password } = await c.req.json();
-    console.log('[REGISTER] Data:', { firstName, lastName, email });
     
     // Validate required fields
     if (!firstName?.trim() || !lastName?.trim() || !email || !password) {
-      console.log('[REGISTER] Missing required fields');
+
       return c.json({ error: 'First name, last name, email and password required' }, 400);
     }
     
@@ -278,10 +274,10 @@ app.post('/api/auth/register', async (c) => {
       }
     }
 
-    console.log('[REGISTER] Getting supabase client');
+
     const supabase = c.get('supabase');
     
-    console.log('[REGISTER] Checking existing user');
+
     const { data: existing, error: existingError } = await supabase
       .from('users')
       .select('id')
@@ -296,12 +292,12 @@ app.post('/api/auth/register', async (c) => {
       return c.json({ error: 'Email already registered' }, 400);
     }
 
-    console.log('[REGISTER] Hashing password');
+
     const hash = await bcrypt.hash(password, 10);
     const trialEndsAt = new Date();
     trialEndsAt.setDate(trialEndsAt.getDate() + 14); // 14-day trial
     
-    console.log('[REGISTER] Inserting user');
+
     const { data, error } = await supabase
       .from('users')
       .insert([{ 
@@ -320,13 +316,13 @@ app.post('/api/auth/register', async (c) => {
       throw error;
     }
 
-    console.log('[REGISTER] Creating token');
+
     const token = await jwt.sign(
       { userId: data.id, email: data.email },
       String(c.env.JWT_SECRET)
     );
 
-    console.log('[REGISTER] Success');
+
     return c.json({ 
       token, 
       user: { 
@@ -566,46 +562,38 @@ app.put('/api/chatbots/:id', authenticateToken, async (c) => {
 app.get('/api/chatbots/:id/analytics', authenticateToken, async (c) => {
   try {
     const chatbotId = c.req.param('id');
-    const days = parseInt(c.req.query('days')) || 30;
+    const days = parseInt(c.req.query('days')) || 7;
     const supabase = c.get('supabase');
     
-    // Get analytics data for the last N days
-    const { data: analytics, error } = await supabase
-      .from('chat_analytics')
-      .select('*')
-      .eq('chatbot_id', chatbotId)
-      .gte('date', new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
-      .order('date', { ascending: true });
-    
-    if (error) throw error;
-    
-    // Get real-time stats for today
+    // Get today's stats
     const today = new Date().toISOString().split('T')[0];
-    const { data: todayStats } = await supabase
+    const { data: todaySessions } = await supabase
       .from('chat_sessions')
-      .select(`
-        id,
-        started_at,
-        ended_at,
-        message_count,
-        satisfaction_rating,
-        chat_messages(response_time_ms)
-      `)
+      .select('id,message_count,satisfaction_rating')
       .eq('chatbot_id', chatbotId)
-      .gte('started_at', today)
-      .lt('started_at', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+      .gte('started_at', today);
+    
+    // Get today's conversations for response time
+    const { data: todayConversations } = await supabase
+      .from('conversations')
+      .select('response_time_ms')
+      .eq('chatbot_id', chatbotId)
+      .eq('is_user_message', false)
+      .gte('created_at', today)
+      .not('response_time_ms', 'is', null);
     
     const realTimeStats = {
-      todaySessions: todayStats?.length || 0,
-      todayMessages: todayStats?.reduce((sum, session) => sum + (session.message_count || 0), 0) || 0,
-      avgResponseTime: todayStats?.reduce((sum, session) => {
-        const avgTime = session.chat_messages?.reduce((s, msg) => s + (msg.response_time_ms || 0), 0) / (session.chat_messages?.length || 1);
-        return sum + avgTime;
-      }, 0) / (todayStats?.length || 1) || 0,
-      avgSatisfaction: todayStats?.filter(s => s.satisfaction_rating).reduce((sum, s) => sum + s.satisfaction_rating, 0) / todayStats?.filter(s => s.satisfaction_rating).length || 0
+      todaySessions: todaySessions?.length || 0,
+      todayMessages: todaySessions?.reduce((sum, s) => sum + (s.message_count || 0), 0) || 0,
+      avgResponseTime: todayConversations?.length > 0 
+        ? todayConversations.reduce((sum, c) => sum + c.response_time_ms, 0) / todayConversations.length 
+        : 0,
+      avgSatisfaction: todaySessions?.filter(s => s.satisfaction_rating).length > 0
+        ? todaySessions.filter(s => s.satisfaction_rating).reduce((sum, s) => sum + s.satisfaction_rating, 0) / todaySessions.filter(s => s.satisfaction_rating).length
+        : 0
     };
     
-    return c.json({ analytics, realTimeStats });
+    return c.json({ analytics: [], realTimeStats });
   } catch (error) {
     logError(c, error, 'ANALYTICS_FETCH');
     return c.json({ error: 'Failed to fetch analytics' }, 500);
@@ -798,16 +786,20 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
     const currentSessionId = sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Create or update chat session
-    await supabase.from('chat_sessions').upsert({
+    const { error: sessionError } = await supabase.from('chat_sessions').upsert({
       chatbot_id: chatbotId,
       session_id: currentSessionId,
       ip_address: ip,
       user_agent: userAgent,
       started_at: new Date().toISOString()
     }, { onConflict: 'session_id' });
+    
+    if (sessionError) {
+      console.error('[CHAT] Session insert error:', sessionError);
+    }
 
     // Log user message in conversations table
-    await supabase.from('conversations').insert({
+    const { data: userMsgData, error: userMsgError } = await supabase.from('conversations').insert({
       chatbot_id: chatbotId,
       session_id: currentSessionId,
       message: sanitizedMessage,
@@ -815,7 +807,11 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
       is_user_message: true,
       ip_address: ip,
       user_agent: userAgent
-    });
+    }).select();
+    
+    if (userMsgError) {
+      console.error('[CHAT] User message insert error:', userMsgError);
+    }
 
     const { data: documents } = await supabase
       .from('documents')
@@ -826,7 +822,7 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
       const botResponse = "I apologize, but I don't have enough information to answer your question at the moment. Please contact our support team for assistance.";
       
       // Log bot response in conversations table
-      await supabase.from('conversations').insert({
+      const { error: botMsgError1 } = await supabase.from('conversations').insert({
         chatbot_id: chatbotId,
         session_id: currentSessionId,
         message: null,
@@ -834,6 +830,10 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
         is_user_message: false,
         response_time_ms: Date.now() - startTime
       });
+      
+      if (botMsgError1) {
+        console.error('[CHAT] Bot message insert error (no docs):', botMsgError1);
+      }
       
       return c.json({ response: botResponse, sessionId: currentSessionId });
     }
@@ -867,7 +867,7 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
     const responseTime = Date.now() - startTime;
 
     // Log bot response in conversations table
-    await supabase.from('conversations').insert({
+    const { error: botMsgError2 } = await supabase.from('conversations').insert({
       chatbot_id: chatbotId,
       session_id: currentSessionId,
       message: null,
@@ -875,9 +875,17 @@ app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
       is_user_message: false,
       response_time_ms: responseTime
     });
+    
+    if (botMsgError2) {
+      console.error('[CHAT] Bot message insert error:', botMsgError2);
+    }
 
     // Update session message count
-    await supabase.rpc('increment_session_messages', { session_id_param: currentSessionId });
+    const { error: rpcError } = await supabase.rpc('increment_session_messages', { session_id_param: currentSessionId });
+    
+    if (rpcError) {
+      console.error('[CHAT] RPC increment error:', rpcError);
+    }
 
     return c.json({ response: botResponse, sessionId: currentSessionId });
   } catch (error) {
@@ -913,8 +921,8 @@ app.get('/public/chatbots/:id', cors({ origin: '*' }), rateLimitMiddleware(1000,
         welcomeMessage: dbData.welcome_message
       };
       
-      // Cache for 30 seconds (short TTL for faster updates)
-      await setCache(c, cacheKey, data, 30);
+      // Cache for 60 seconds (minimum TTL)
+      await setCache(c, cacheKey, data, 60);
     }
 
     return c.json(data);
@@ -926,10 +934,11 @@ app.get('/public/chatbots/:id', cors({ origin: '*' }), rateLimitMiddleware(1000,
 
 // Serve widget.js with CDN caching
 app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
-  // Set CDN cache headers
-  c.header('Cache-Control', 'public, max-age=3600, s-maxage=86400'); // 1 hour browser, 24 hour CDN
+  // Disable cache during development
+  c.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  c.header('Pragma', 'no-cache');
+  c.header('Expires', '0');
   c.header('Content-Type', 'application/javascript');
-  c.header('ETag', `"widget-v${Date.now()}"`);
   const widgetCode = `(async function() {
     if (!window.chatbotConfig) {
         console.error('Chatbot configuration not found!');
@@ -945,17 +954,17 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
     let live = {};
     try {
         const apiUrl = \`\${cfg.apiUrl}/public/chatbots/\${cfg.chatbotId}\`;
-        console.log('Fetching chatbot config from:', apiUrl);
+
         const res = await fetch(apiUrl, { cache: 'no-store' });
         if (res.ok) {
             live = await res.json();
-            console.log('Chatbot config loaded successfully');
+
         } else {
-            console.log(\`Chatbot not deployed or not found. Status: \${res.status}, ID: \${cfg.chatbotId}\`);
+
             return;
         }
     } catch (e) {
-        console.log('Chatbot not available:', e.message);
+
         return;
     }
 
@@ -1153,6 +1162,27 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
         return typing;
     }
 
+    // Session management: persists across page refreshes, expires after 30min inactivity
+    const sessionKey = 'chatbot_session_' + config.chatbotId;
+    const sessionTimeKey = 'chatbot_session_time_' + config.chatbotId;
+    const sessionTimeout = 30 * 60 * 1000; // 30 minutes
+    
+    let currentSessionId = localStorage.getItem(sessionKey);
+    let sessionExpired = false;
+    const lastActivity = localStorage.getItem(sessionTimeKey);
+    
+    // Check if session is still valid
+    function isSessionValid() {
+        const lastAct = localStorage.getItem(sessionTimeKey);
+        if (!lastAct) return false;
+        return (Date.now() - parseInt(lastAct)) < sessionTimeout;
+    }
+    
+    // Initial check
+    if (lastActivity && !isSessionValid()) {
+        sessionExpired = true;
+    }
+
     async function sendMessage(text) {
         if (!text.trim()) return;
         
@@ -1171,12 +1201,19 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
                 },
                 body: JSON.stringify({
                     chatbotId: config.chatbotId,
-                    message: text
+                    message: text,
+                    sessionId: currentSessionId
                 })
             });
 
             const data = await response.json();
             typingIndicator.remove();
+            
+            if (data.sessionId) {
+                currentSessionId = data.sessionId;
+                localStorage.setItem(sessionKey, currentSessionId);
+                localStorage.setItem(sessionTimeKey, Date.now().toString());
+            }
             
             if (data.error) {
                 if (data.error.includes('training data')) {
@@ -1204,12 +1241,34 @@ app.get('/widget.js', rateLimitMiddleware(200, 3600), async (c) => {
     };
 
     let welcomeShown = false;
+    let expirationShown = false;
+    
+    // Check for session expiration periodically (every minute)
+    setInterval(() => {
+        if (currentSessionId && !isSessionValid() && !expirationShown) {
+
+            addMessage('Your session expired due to inactivity. Please send a message to start a new conversation.');
+            expirationShown = true;
+            // Clear session
+            localStorage.removeItem(sessionKey);
+            localStorage.removeItem(sessionTimeKey);
+            currentSessionId = null;
+        }
+    }, 60000); // Check every minute
     
     function showChat() {
         chatWindow.style.display = 'flex';
         input.focus();
-        if (!welcomeShown && config.welcomeMessage) {
-            addMessage(config.welcomeMessage);
+        if (!welcomeShown) {
+            if (sessionExpired && !expirationShown) {
+                addMessage('Your previous session expired due to inactivity. Starting a new conversation.');
+                expirationShown = true;
+                localStorage.removeItem(sessionKey);
+                localStorage.removeItem(sessionTimeKey);
+                currentSessionId = null;
+            } else if (config.welcomeMessage) {
+                addMessage(config.welcomeMessage);
+            }
             welcomeShown = true;
         }
     }

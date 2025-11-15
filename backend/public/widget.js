@@ -1,13 +1,11 @@
 (async function() {
     // Configuration validation
     if (!window.chatbotConfig) {
-        console.error('Chatbot configuration not found!');
         return;
     }
 
     const cfg = window.chatbotConfig;
     if (!cfg.chatbotId || !cfg.apiUrl) {
-        console.error('Missing required chatbot configuration!');
         return;
     }
 
@@ -15,17 +13,13 @@
     let live = {};
     try {
         const apiUrl = `${cfg.apiUrl}/public/chatbots/${cfg.chatbotId}`;
-        console.log('Fetching chatbot config from:', apiUrl);
         const res = await fetch(apiUrl, { cache: 'no-store' });
         if (res.ok) {
             live = await res.json();
-            console.log('Chatbot config loaded successfully');
         } else {
-            console.log(`Chatbot not deployed or not found. Status: ${res.status}, ID: ${cfg.chatbotId}`);
             return;
         }
     } catch (e) {
-        console.log('Chatbot not available:', e.message);
         return;
     }
 
@@ -278,7 +272,6 @@
         } catch (error) {
             typingIndicator.remove();
             addMessage('Sorry, I encountered an error. Please try again later.');
-            console.error('Chat error:', error);
         } finally {
             input.disabled = false;
             sendButton.disabled = false;
