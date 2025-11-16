@@ -776,7 +776,7 @@ app.delete('/api/chatbots/:id/documents/:docId', authenticateToken, async (c) =>
 });
 
 // === CHAT ENDPOINT ===
-app.post('/api/chat', rateLimitMiddleware(500, 3600), async (c) => {
+app.post('/api/chat', rateLimitMiddleware(50, 3600), async (c) => {
   const startTime = Date.now();
   try {
     const { chatbotId, message, sessionId } = await c.req.json();
