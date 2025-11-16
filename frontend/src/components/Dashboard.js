@@ -212,15 +212,15 @@ function Dashboard({ setAuth }) {
       padding: '40px 20px'
     }}>
       {/* Inline Notification */}
-      {notification && (
+      {notification && activeTab !== 'customize' && (
         <div style={{
           maxWidth: '1200px',
           margin: '0 auto 24px auto',
           background: notification.type === 'error' ? 'linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)' : 
                      notification.type === 'warning' ? 'linear-gradient(135deg, #fef3c7 0%, #fed7aa 100%)' : 
-                     'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)',
+                     'linear-gradient(135deg, #e0e7ff 0%, #c7d2fe 100%)',
           border: `2px solid ${notification.type === 'error' ? '#f87171' : 
-                               notification.type === 'warning' ? '#fbbf24' : '#34d399'}`,
+                               notification.type === 'warning' ? '#fbbf24' : '#667eea'}`,
           borderRadius: '12px',
           padding: '18px 24px',
           display: 'flex',
@@ -234,7 +234,7 @@ function Dashboard({ setAuth }) {
               height: '40px',
               borderRadius: '50%',
               background: notification.type === 'error' ? '#ef4444' : 
-                         notification.type === 'warning' ? '#f59e0b' : '#10b981',
+                         notification.type === 'warning' ? '#f59e0b' : '#667eea',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -244,7 +244,7 @@ function Dashboard({ setAuth }) {
             </div>
             <span style={{
               color: notification.type === 'error' ? '#7f1d1d' : 
-                     notification.type === 'warning' ? '#92400e' : '#064e3b',
+                     notification.type === 'warning' ? '#92400e' : '#4338ca',
               fontSize: '16px',
               fontWeight: '600',
               lineHeight: '1.5'
@@ -832,6 +832,21 @@ function Dashboard({ setAuth }) {
                 >
                   Save Changes
                 </button>
+                
+                {notification && activeTab === 'customize' && (
+                  <div style={{
+                    marginTop: '16px',
+                    padding: '12px 16px',
+                    background: notification.type === 'error' ? '#fee2e2' : '#e0e7ff',
+                    border: `1px solid ${notification.type === 'error' ? '#f87171' : '#667eea'}`,
+                    borderRadius: '8px',
+                    color: notification.type === 'error' ? '#991b1b' : '#4338ca',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}>
+                    {notification.message}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -858,19 +873,21 @@ function Dashboard({ setAuth }) {
 
               <button
                 onClick={handleDeploy}
+                disabled={selectedChatbot?.is_deployed}
                 style={{
-                  background: '#10b981',
+                  background: selectedChatbot?.is_deployed ? '#9ca3af' : '#10b981',
                   color: 'white',
                   padding: '12px 32px',
                   border: 'none',
                   borderRadius: '8px',
                   fontSize: '16px',
                   fontWeight: '600',
-                  cursor: 'pointer',
-                  marginBottom: '24px'
+                  cursor: selectedChatbot?.is_deployed ? 'not-allowed' : 'pointer',
+                  marginBottom: '24px',
+                  opacity: selectedChatbot?.is_deployed ? 0.6 : 1
                 }}
               >
-                Deploy Chatbot
+                {selectedChatbot?.is_deployed ? 'Already Deployed' : 'Deploy Chatbot'}
               </button>
 
               <div style={{
